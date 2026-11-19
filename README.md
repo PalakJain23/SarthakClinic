@@ -1,30 +1,40 @@
 # Sarthak Clinic
 
-A mobile-first Next.js app for a local clinic. The public page shows doctor and
-availability details; the private doctor area manages appointments, patients,
-visits, and a transaction-based ledger.
+A mobile-first Next.js app for a local clinic. The public page shows the clinic
+owner profile and availability; the private doctor area manages appointments,
+patients, visits, and a transaction-based ledger.
 
 ## What is implemented
 
-- Hindi-first public homepage with an English switch, configurable contact
-  details, today’s scheduled sessions, a privacy notice, and visit-request form.
+- Hindi-first public homepage with an English switch, the clinic owner’s
+  independent public profile, configurable contact details, today’s scheduled
+  sessions, a privacy notice, and visit-request form.
 - Supabase RPC booking submission with server-side Zod validation, normalized
   Indian mobile numbers, idempotency, date/session rechecks, and atomic capacity
   enforcement. No SMS or WhatsApp messages are sent.
 - Supabase Auth doctor login, recovery, explicit authorized-doctor checks,
   private dashboard, patient records, dated availability, appointment status,
   and auditable visit notes.
-- Integer-paise ledger with immutable entries, idempotent writes, explicit
-  overpayment confirmation, linked reversals, signed corrections, patient
-  credits, and derived balances.
-- Row Level Security, narrowly scoped public views/RPCs, SQL migration, and
-  fictional local-only public fixtures.
-- Fictional public preview content is kept in
-  `src/lib/sample-public-content.ts`; actual saved profile details and schedules
-  take precedence. Preview-only sample timings never accept bookings.
+- Integer-paise ledger with immutable entries, idempotent writes, payment caps,
+  linked reversals, signed corrections, and derived balances. Ledger accounts
+  can exist independently of clinical patient and appointment records.
+- Row Level Security, narrowly scoped public views/RPCs, SQL migrations, and
+  local-only preview locations and schedules. The clinic owner uses the existing
+  singleton clinic profile and is not duplicated in Doctors Management.
+- Public preview content is kept in `src/lib/sample-public-content.ts`; actual
+  saved profile details and schedules take precedence. Preview-only sample
+  timings never accept bookings.
 - The additive `202611020002_doctor_ledger_workspace.sql` migration adds
   authorized, paginated ledger queries and net totals that account for linked
   reversals without rewriting existing financial entries.
+- The additive `202611140001_ledger_people_and_history.sql` migration maps
+  existing ledger entries to independent ledger accounts without changing
+  transaction amounts, and adds doctor-only account and history RPCs.
+- The additive `202611180001_primary_owner_profile_images.sql` migration seeds
+  the owner name only when needed, adds optional registration information, and
+  creates a public profile-image bucket whose write and management policies
+  require an authenticated authorized clinic administrator. It does not change
+  patient, appointment, or ledger policies.
 
 This is not production-ready until Supabase is configured, migrations and
 database tests are applied, an authorized doctor is provisioned, and deployment
@@ -67,11 +77,14 @@ Requirements: Node.js 22 LTS (or a compatible supported Node version) and npm.
    browser or this repository, and do not paste secrets into chat. Restart the
    dev server after changing environment variables.
 
-4. Apply the migrations using the Supabase CLI. The additive
-   `202611020001_public_clinic_speciality.sql` migration adds the doctor
-   speciality field without replacing existing profile or clinic data. For an
-   isolated local Supabase stack, install and start Docker Desktop, initialize
-   the CLI configuration once, and use only the local database:
+4. Apply the migrations using the Supabase CLI, including
+   `202611140001_ledger_people_and_history.sql` for independent Udhaar accounts
+   and `202611180001_primary_owner_profile_images.sql` for the owner profile and
+   its authorized image-storage policies.
+   The additive `202611020001_public_clinic_speciality.sql` migration adds the
+   doctor speciality field without replacing existing profile or clinic data.
+   For an isolated local Supabase stack, install and start Docker Desktop,
+   initialize the CLI configuration once, and use only the local database:
 
    ```powershell
    npx supabase init

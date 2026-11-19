@@ -29,6 +29,28 @@ body {
   font-family: Arial, "Noto Sans Devanagari", "Mangal", sans-serif;
 }
 
+.clinic-hero-copy {
+  font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", Arial, sans-serif;
+}
+
+.home-container {
+  width: calc(100% - 2rem);
+  max-width: 76rem;
+  margin-inline: auto;
+}
+
+@media (min-width: 40rem) {
+  .home-container {
+    width: calc(100% - 3rem);
+  }
+}
+
+@media (min-width: 64rem) {
+  .home-container {
+    width: calc(100% - 4rem);
+  }
+}
+
 button,
 input,
 select,

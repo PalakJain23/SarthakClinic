@@ -19,6 +19,24 @@ export function calculateLedgerBalance(entries: readonly LedgerAmount[]) {
   return entries.reduce((balance, entry) => balance + entry.amountPaise, 0n);
 }
 
+export function calculateBalanceAfterReversal(
+  currentBalancePaise: bigint,
+  entryAmountPaise: bigint,
+): bigint | null {
+  const nextBalance = currentBalancePaise - entryAmountPaise;
+  return nextBalance < 0n ? null : nextBalance;
+}
+
+export function calculateLedgerRunningBalances<T extends LedgerAmount>(
+  entries: readonly T[],
+) {
+  let balance = 0n;
+  return entries.map((entry) => {
+    balance += entry.amountPaise;
+    return { ...entry, runningBalance: balance };
+  });
+}
+
 export function calculateAccountTotals(balances: readonly bigint[]) {
   return balances.reduce(
     (totals, balance) => {

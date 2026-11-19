@@ -5,13 +5,14 @@ import { z } from "zod";
 import { requireDoctor } from "@/lib/doctor-auth";
 import { isoDateSchema, normalizeIndianMobile } from "@/lib/booking-schema";
 import { parseRupeesToPaise } from "@/lib/ledger";
-import { indiaDate } from "@/lib/format";
+import { formatRupees, indiaDate } from "@/lib/format";
 
 export type FormActionState = {
   error?: string;
   success?: string;
   successToken?: string;
   patient?: { id: string; fullName: string; mobile: string };
+  ledgerPersonId?: string;
 };
 
 const uuid = z.string().uuid();
@@ -453,80 +454,6 @@ export async function linkAppointmentPatientAction(
   return { success: createNew ? "New patient record created and linked." : "Patient record linked." };
 }
 
-export async function createWalkInAction(
-  _previous: FormActionState,
-  formData: FormData,
-): Promise<FormActionState> {
-  const sessionId = String(formData.get("sessionId") ?? "");
-  const patientId = String(formData.get("patientId") ?? "").trim();
-  const name = String(formData.get("patientName") ?? "").trim();
-  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
-  if (
-    !uuid.safeParse(sessionId).success ||
-    (patientId && !uuid.safeParse(patientId).success) ||
-    !uuid.safeParse(idempotencyKey).success
-  ) {
-    return { error: "Select a valid session and patient record." };
-  }
-  let mobile: string;
-  try {
-    mobile = normalizeIndianMobile(String(formData.get("mobile") ?? ""));
-  } catch {
-    return { error: "Enter a valid Indian mobile number." };
-  }
-  if (name.length < 2 || name.length > 100) {
-    return { error: "Enter a patient name." };
-  }
-  const { supabase } = await requireDoctor();
-  const { data: existing, error: existingError } = await supabase
-    .from("appointments")
-    .select("id, session_id, patient_id, patient_name, mobile")
-    .eq("idempotency_key", idempotencyKey)
-    .maybeSingle();
-  if (existingError) {
-    console.error("Could not check walk-in idempotency", { code: existingError.code });
-    return { error: "Walk-in could not be verified. Try again." };
-  }
-  if (existing) {
-    return existing.session_id === sessionId &&
-      existing.patient_id === (patientId || null) &&
-      existing.patient_name === name &&
-      existing.mobile === mobile
-      ? { success: "Walk-in added.", successToken: crypto.randomUUID() }
-      : { error: "This submission key was already used for a different walk-in." };
-  }
-  const { error } = await supabase.from("appointments").insert({
-    booking_reference: `WALKIN-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
-    idempotency_key: idempotencyKey,
-    session_id: sessionId,
-    patient_id: patientId || null,
-    patient_name: name,
-    mobile,
-    privacy_acknowledged: true,
-    status: "waiting",
-  });
-  if (error) {
-    console.error("Walk-in creation failed", { code: error.code });
-    if (error.code === "23505") {
-      const { data: retryRecord, error: retryError } = await supabase
-        .from("appointments")
-        .select("id, session_id, patient_id, patient_name, mobile")
-        .eq("idempotency_key", idempotencyKey)
-        .maybeSingle();
-      if (!retryError && retryRecord?.session_id === sessionId &&
-        retryRecord.patient_id === (patientId || null) &&
-        retryRecord.patient_name === name && retryRecord.mobile === mobile) {
-        return { success: "Walk-in added.", successToken: crypto.randomUUID() };
-      }
-    }
-    return { error: "Walk-in could not be added. Check session capacity and try again." };
-  }
-  revalidatePath("/doctor");
-  revalidatePath("/doctor/appointments");
-  revalidatePath("/doctor/reports");
-  return { success: "Walk-in added.", successToken: crypto.randomUUID() };
-}
-
 export async function recordLedgerAction(
   _previous: FormActionState,
   formData: FormData,
@@ -572,8 +499,8 @@ export async function recordLedgerAction(
   });
   if (error) {
     console.error("Ledger write failed", { code: error.code });
-    if (error.message.includes("Overpayment confirmation required")) {
-      return { error: "Payment exceeds the balance. Confirm patient credit and retry." };
+    if (error.message.includes("Payment exceeds the outstanding balance")) {
+      return { error: "Payment cannot exceed the current outstanding balance." };
     }
     return { error: "Transaction could not be recorded." };
   }
@@ -584,37 +511,239 @@ export async function recordLedgerAction(
   return { success: "Transaction recorded.", successToken: crypto.randomUUID() };
 }
 
-export async function saveProfileAction(
+export async function recordLedgerPersonAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const personChoice = String(formData.get("personChoice") ?? "");
+  const personId = personChoice === "new" ? null : personChoice;
+  const entryType = String(formData.get("entryType") ?? "");
+  const amount = parseRupeesToPaise(String(formData.get("amount") ?? ""));
+  const rawDescription = String(formData.get("description") ?? "").trim();
+  const description = rawDescription || (entryType === "payment" ? "Payment received" : "Udhaar added");
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (
+    (personId !== null && !uuid.safeParse(personId).success) ||
+    !uuid.safeParse(idempotencyKey).success ||
+    !["charge", "payment"].includes(entryType) ||
+    amount === null ||
+    description.length > 240
+  ) {
+    return { error: "Enter a valid person, transaction amount, date, and optional note." };
+  }
+  if (!personId && entryType !== "charge") {
+    return { error: "Select an existing person before recording a payment." };
+  }
+  if (!personId && (String(formData.get("fullName") ?? "").trim().length < 1 ||
+    String(formData.get("fullName") ?? "").trim().length > 120)) {
+    return { error: "Enter a name of up to 120 characters." };
+  }
+  const rawMobile = String(formData.get("mobile") ?? "").trim();
+  let mobile: string | null = null;
+  if (rawMobile) {
+    try {
+      mobile = normalizeIndianMobile(rawMobile);
+    } catch {
+      return { error: "Enter a valid Indian phone number or leave it blank." };
+    }
+  }
+  const effectiveDate = String(formData.get("effectiveDate") ?? "");
+  if (!isoDateSchema.safeParse(effectiveDate).success) {
+    return { error: "Choose a transaction date." };
+  }
+
+  const { supabase } = await requireDoctor();
+  const { data, error } = await supabase.rpc("post_ledger_person_entry", {
+    p_person_id: personId,
+    p_full_name: personId ? null : String(formData.get("fullName") ?? "").trim(),
+    p_mobile: personId ? null : mobile,
+    p_entry_type: entryType,
+    p_amount_paise: Number(amount),
+    p_description: description || (entryType === "payment" ? "Payment received" : "Udhaar added"),
+    p_effective_at: `${effectiveDate}T12:00:00+05:30`,
+    p_idempotency_key: idempotencyKey,
+    p_correction_reason: null,
+    p_reverses_entry_id: null,
+  });
+  if (error) {
+    console.error("Ledger person transaction failed", { code: error.code });
+    if (error.message.includes("Payment exceeds the outstanding balance")) {
+      return { error: "Payment cannot exceed the current outstanding balance." };
+    }
+    return { error: "Transaction could not be recorded. Refresh and try again." };
+  }
+  if (!uuid.safeParse(data).success) {
+    throw new Error("The ledger transaction was saved without returning its account ID.");
+  }
+  revalidatePath("/doctor/accounts");
+  revalidatePath(`/doctor/accounts/${data}`);
+  revalidatePath("/doctor");
+  revalidatePath("/doctor/reports");
+  return {
+    success: entryType === "payment" ? "Payment received." : "Udhaar added.",
+    successToken: crypto.randomUUID(),
+    ledgerPersonId: data,
+  };
+}
+
+export async function saveOwnerProfileAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const doctorName = String(formData.get("doctorName") ?? "").trim();
+  const qualification = String(formData.get("qualification") ?? "").trim();
+  const speciality = String(formData.get("speciality") ?? "").trim();
+  const registrationInfo = String(formData.get("registrationInfo") ?? "").trim();
+  const introduction = String(formData.get("introduction") ?? "").trim();
+  const photo = formData.get("photo");
+
+  if (
+    !doctorName ||
+    doctorName.length > 120 ||
+    qualification.length > 200 ||
+    speciality.length > 120 ||
+    registrationInfo.length > 300 ||
+    introduction.length > 1200
+  ) {
+    return { error: "Check the owner profile details and try again." };
+  }
+
+  let photoExtension: string | null = null;
+  let photoContentType: string | null = null;
+  if (photo instanceof File && photo.size > 0) {
+    if (photo.size > 5 * 1024 * 1024) {
+      return { error: "Choose an image smaller than 5 MB." };
+    }
+
+    const bytes = Buffer.from(await photo.arrayBuffer());
+    const isJpeg = photo.type === "image/jpeg" &&
+      bytes.length >= 3 &&
+      bytes[0] === 0xff &&
+      bytes[1] === 0xd8 &&
+      bytes[2] === 0xff;
+    const isPng = photo.type === "image/png" &&
+      bytes.length >= 8 &&
+      bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const isWebp = photo.type === "image/webp" &&
+      bytes.length >= 12 &&
+      bytes.toString("ascii", 0, 4) === "RIFF" &&
+      bytes.toString("ascii", 8, 12) === "WEBP";
+
+    if (isJpeg) {
+      photoExtension = "jpg";
+      photoContentType = "image/jpeg";
+    } else if (isPng) {
+      photoExtension = "png";
+      photoContentType = "image/png";
+    } else if (isWebp) {
+      photoExtension = "webp";
+      photoContentType = "image/webp";
+    } else {
+      return { error: "Upload a valid JPEG, PNG, or WebP image." };
+    }
+  } else if (photo !== null && !(photo instanceof File)) {
+    return { error: "The selected profile image is invalid." };
+  }
+
+  const { supabase, user } = await requireDoctor();
+  const { data: existingProfile, error: profileLookupError } = await supabase
+    .from("clinic_profile")
+    .select("doctor_photo_url")
+    .eq("singleton", true)
+    .maybeSingle();
+  if (profileLookupError) {
+    console.error("Owner profile lookup failed", { code: profileLookupError.code });
+    return { error: "The current profile could not be loaded." };
+  }
+
+  const bucket = "clinic-profile-images";
+  let uploadedPath: string | null = null;
+  let photoUrl = existingProfile?.doctor_photo_url ?? null;
+  if (photoExtension && photoContentType && photo instanceof File) {
+    uploadedPath = `${user.id}/primary-profile-${crypto.randomUUID()}.${photoExtension}`;
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(uploadedPath, photo, {
+        cacheControl: "3600",
+        contentType: photoContentType,
+        upsert: false,
+      });
+    if (uploadError) {
+      console.error("Owner profile image upload failed", { code: uploadError.name });
+      return { error: "The profile image could not be uploaded." };
+    }
+    photoUrl = supabase.storage.from(bucket).getPublicUrl(uploadedPath).data.publicUrl;
+  }
+
+  const { error: saveError } = await supabase.from("clinic_profile").upsert(
+    {
+      singleton: true,
+      doctor_name: doctorName,
+      qualification,
+      speciality: speciality || null,
+      registration_info: registrationInfo,
+      public_introduction: introduction,
+      doctor_photo_url: photoUrl,
+    },
+    { onConflict: "singleton" },
+  );
+  if (saveError) {
+    console.error("Owner profile update failed", { code: saveError.code });
+    if (uploadedPath) {
+      const { error: cleanupError } = await supabase.storage.from(bucket).remove([uploadedPath]);
+      if (cleanupError) {
+        console.error("Unpublished owner profile image cleanup failed", { code: cleanupError.name });
+      }
+    }
+    return { error: "The owner profile could not be saved." };
+  }
+
+  let previousImageCleanupFailed = false;
+  const previousPhotoUrl = existingProfile?.doctor_photo_url;
+  if (uploadedPath && previousPhotoUrl) {
+    const newPublicUrl = supabase.storage.from(bucket).getPublicUrl(uploadedPath).data.publicUrl;
+    const newUrl = new URL(newPublicUrl);
+    const encodedSuffix = `/${uploadedPath.split("/").map(encodeURIComponent).join("/")}`;
+    const storagePrefix = newUrl.pathname.endsWith(encodedSuffix)
+      ? newUrl.pathname.slice(0, -encodedSuffix.length)
+      : null;
+    if (storagePrefix) {
+      const previousUrl = new URL(previousPhotoUrl);
+      if (previousUrl.origin === newUrl.origin && previousUrl.pathname.startsWith(`${storagePrefix}/`)) {
+        const previousPath = previousUrl.pathname
+          .slice(storagePrefix.length + 1)
+          .split("/")
+          .map(decodeURIComponent)
+          .join("/");
+        const { error: cleanupError } = await supabase.storage.from(bucket).remove([previousPath]);
+        if (cleanupError) {
+          previousImageCleanupFailed = true;
+          console.error("Previous owner profile image cleanup failed", { code: cleanupError.name });
+        }
+      }
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/doctor/settings");
+  return {
+    success: previousImageCleanupFailed
+      ? "Profile saved. The previous image could not be removed."
+      : "Profile saved.",
+  };
+}
+
+export async function saveClinicDetailsAction(
   _previous: FormActionState,
   formData: FormData,
 ): Promise<FormActionState> {
   const clinicName = String(formData.get("clinicName") ?? "").trim();
-  const doctorName = String(formData.get("doctorName") ?? "").trim();
-  const qualification = String(formData.get("qualification") ?? "").trim();
-  const speciality = String(formData.get("speciality") ?? "").trim();
-  const introduction = String(formData.get("introduction") ?? "").trim();
   const phoneInput = String(formData.get("phone") ?? "").trim();
   const whatsappInput = String(formData.get("whatsapp") ?? "").trim();
-  const photoUrl = String(formData.get("doctorPhotoUrl") ?? "").trim();
-  let validPhotoUrl = false;
-  if (photoUrl) {
-    try {
-      validPhotoUrl = new URL(photoUrl).protocol === "https:" && Boolean(new URL(photoUrl).hostname);
-    } catch {
-      validPhotoUrl = false;
-    }
+  if (!clinicName || clinicName.length > 120) {
+    return { error: "Enter a clinic name up to 120 characters." };
   }
-  if (
-    !clinicName ||
-    clinicName.length > 120 ||
-    doctorName.length > 120 ||
-    qualification.length > 200 ||
-    speciality.length > 120 ||
-    introduction.length > 1200 ||
-    (photoUrl !== "" && (!validPhotoUrl || photoUrl.length > 1000))
-  ) {
-    return { error: "Check the clinic and doctor details." };
-  }
+
   function optionalMobile(value: string) {
     if (!value) return null;
     try {
@@ -628,28 +757,25 @@ export async function saveProfileAction(
   if (phone === undefined || whatsapp === undefined) {
     return { error: "Use a valid 10-digit Indian number or leave the contact field blank." };
   }
+
   const { supabase } = await requireDoctor();
   const { error } = await supabase.from("clinic_profile").upsert(
     {
       singleton: true,
       clinic_name: clinicName,
-      doctor_name: doctorName,
-      qualification,
-      speciality: speciality || null,
-      public_introduction: introduction,
-      doctor_photo_url: photoUrl || null,
       public_phone: phone,
       public_whatsapp: whatsapp,
     },
     { onConflict: "singleton" },
   );
   if (error) {
-    console.error("Clinic profile update failed", { code: error.code });
-    return { error: "Settings could not be saved." };
+    console.error("Clinic details update failed", { code: error.code });
+    return { error: "Clinic details could not be saved." };
   }
+
   revalidatePath("/");
   revalidatePath("/doctor/settings");
-  return { success: "Settings saved." };
+  return { success: "Clinic details saved." };
 }
 
 export async function updatePatientAction(
@@ -913,27 +1039,50 @@ export async function addVisitAction(
   return { success: "Visit note saved." };
 }
 
-export async function reverseLedgerEntryAction(
+function correctionReason(formData: FormData): { reason: string } | { error: string } {
+  const mistake = String(formData.get("mistake") ?? "");
+  const explanation = String(formData.get("explanation") ?? "").trim();
+  if (explanation.length > 400) {
+    return { error: "Keep the note to 400 characters or fewer." };
+  }
+
+  let reason: string;
+  if (mistake === "wrong_amount") {
+    const correctAmount = parseRupeesToPaise(String(formData.get("correctAmount") ?? ""));
+    if (correctAmount === null) {
+      return { error: "Enter a valid correct amount greater than zero." };
+    }
+    reason = `Wrong amount entered. Correct amount to add separately: ${formatRupees(correctAmount)}`;
+  } else if (mistake === "duplicate_entry") {
+    reason = `Duplicate entry${explanation ? `: ${explanation}` : ""}`;
+  } else if (mistake === "other_mistake") {
+    reason = `Other mistake${explanation ? `: ${explanation}` : ""}`;
+  } else {
+    return { error: "Choose what went wrong." };
+  }
+  return { reason };
+}
+
+export async function correctLedgerEntryAction(
   _previous: FormActionState,
   formData: FormData,
 ): Promise<FormActionState> {
   const patientId = String(formData.get("patientId") ?? "");
   const entryId = String(formData.get("entryId") ?? "");
-  const reason = String(formData.get("reason") ?? "").trim();
+  const details = correctionReason(formData);
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
   const effectiveAt = String(formData.get("effectiveAt") ?? "");
+  if ("error" in details) return details;
   if (
     !uuid.safeParse(patientId).success ||
     !uuid.safeParse(entryId).success ||
     !uuid.safeParse(idempotencyKey).success ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(effectiveAt) ||
-    reason.length < 3 ||
-    reason.length > 500
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(effectiveAt)
   ) {
-    return { error: "Provide a reason of 3–500 characters to reverse this entry." };
+    return { error: "Check the selected transaction and try again." };
   }
-  if (formData.get("confirmReversal") !== "on") {
-    return { error: "Confirm that this entry should be reversed and retained in the ledger history." };
+  if (formData.get("confirmCorrection") !== "on") {
+    return { error: "Confirm that the original transaction should stay in history." };
   }
   const { supabase } = await requireDoctor();
   const { error } = await supabase.rpc("post_ledger_entry", {
@@ -944,19 +1093,208 @@ export async function reverseLedgerEntryAction(
     p_effective_at: effectiveAt,
     p_idempotency_key: idempotencyKey,
     p_overpayment_confirmed: true,
-    p_correction_reason: reason,
+    p_correction_reason: details.reason,
     p_reverses_entry_id: entryId,
   });
   if (error) {
     console.error("Ledger reversal failed", { code: error.code });
-    return { error: "Entry could not be reversed. It may already have a reversal." };
+    if (error.message.includes("negative account balance")) {
+      return { error: "This transaction cannot be canceled because it would create a negative account balance. No change was made." };
+    }
+    return { error: "This transaction could not be canceled. It may already be canceled; refresh the history and try again." };
   }
   revalidatePath("/doctor/accounts");
   revalidatePath(`/doctor/patients/${patientId}`);
   revalidatePath("/doctor");
   revalidatePath("/doctor/reports");
   return {
-    success: "Reversal recorded as a new ledger entry.",
+    success: "Mistake recorded. The original stays in history. Add the correct entry separately if needed.",
+    successToken: crypto.randomUUID(),
+  };
+}
+
+export async function correctLedgerPersonEntryAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const personId = String(formData.get("ledgerPersonId") ?? "");
+  const entryId = String(formData.get("entryId") ?? "");
+  const details = correctionReason(formData);
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  const effectiveAt = String(formData.get("effectiveAt") ?? "");
+  if ("error" in details) return details;
+  if (
+    !uuid.safeParse(personId).success ||
+    !uuid.safeParse(entryId).success ||
+    !uuid.safeParse(idempotencyKey).success ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(effectiveAt)
+  ) {
+    return { error: "Check the selected transaction and try again." };
+  }
+  if (formData.get("confirmCorrection") !== "on") {
+    return { error: "Confirm that the original transaction should stay in history." };
+  }
+  const { supabase } = await requireDoctor();
+  const { error } = await supabase.rpc("post_ledger_person_entry", {
+    p_person_id: personId,
+    p_full_name: null,
+    p_mobile: null,
+    p_entry_type: "reversal",
+    p_amount_paise: 1,
+    p_description: "Reversal",
+    p_effective_at: effectiveAt,
+    p_idempotency_key: idempotencyKey,
+    p_correction_reason: details.reason,
+    p_reverses_entry_id: entryId,
+  });
+  if (error) {
+    console.error("Ledger person reversal failed", { code: error.code });
+    if (error.message.includes("negative account balance")) {
+      return { error: "This transaction cannot be canceled because it would create a negative account balance. No change was made." };
+    }
+    return { error: "This transaction could not be canceled. It may already be canceled; refresh the history and try again." };
+  }
+  revalidatePath("/doctor/accounts");
+  revalidatePath(`/doctor/accounts/${personId}`);
+  revalidatePath("/doctor");
+  revalidatePath("/doctor/reports");
+  return {
+    success: "Mistake recorded. The original stays in history. Add the correct entry separately if needed.",
+    successToken: crypto.randomUUID(),
+  };
+}
+
+export async function deleteLedgerPersonEntryAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const personId = String(formData.get("ledgerPersonId") ?? "");
+  const entryId = String(formData.get("entryId") ?? "");
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  const effectiveAt = String(formData.get("effectiveAt") ?? "");
+  if (
+    !uuid.safeParse(personId).success ||
+    !uuid.safeParse(entryId).success ||
+    !uuid.safeParse(idempotencyKey).success ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(effectiveAt)
+  ) {
+    return { error: "Check the selected entry and try again." };
+  }
+  if (formData.get("confirmDelete") !== "on") {
+    return { error: "Confirm that this entry should be removed from the current balance." };
+  }
+
+  const { supabase } = await requireDoctor();
+  const { data: entry, error: entryError } = await supabase
+    .from("ledger_entries")
+    .select("entry_type, ledger_person_id")
+    .eq("id", entryId)
+    .maybeSingle();
+  if (entryError) {
+    console.error("Ledger entry lookup for removal failed", { code: entryError.code });
+    return { error: "Could not verify this entry. Refresh the history and try again." };
+  }
+  if (
+    !entry ||
+    entry.ledger_person_id !== personId ||
+    !["charge", "payment"].includes(entry.entry_type)
+  ) {
+    return { error: "Only an Udhaar or payment entry from this account can be removed." };
+  }
+
+  const { error } = await supabase.rpc("post_ledger_person_entry", {
+    p_person_id: personId,
+    p_full_name: null,
+    p_mobile: null,
+    p_entry_type: "reversal",
+    p_amount_paise: 1,
+    p_description: "Entry removal",
+    p_effective_at: effectiveAt,
+    p_idempotency_key: idempotencyKey,
+    p_correction_reason: "Entry removed by doctor",
+    p_reverses_entry_id: entryId,
+  });
+  if (error) {
+    console.error("Ledger entry removal failed", { code: error.code });
+    if (error.message.includes("negative account balance")) {
+      return { error: "This Udhaar cannot be removed because the account would have a negative balance. No change was made." };
+    }
+    if (error.message.includes("Restore this account")) {
+      return { error: "This account is archived. Restore it before removing an entry." };
+    }
+    return { error: "This entry could not be removed. It may already be removed; refresh the history and try again." };
+  }
+  revalidatePath("/doctor/accounts");
+  revalidatePath(`/doctor/accounts/${personId}`);
+  revalidatePath("/doctor");
+  revalidatePath("/doctor/reports");
+  return {
+    success: "Entry removed from the current balance. The original and its removal remain in history.",
+    successToken: crypto.randomUUID(),
+  };
+}
+
+export async function archiveLedgerPersonAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const personId = String(formData.get("ledgerPersonId") ?? "");
+  if (!uuid.safeParse(personId).success) {
+    return { error: "Check the account and try again." };
+  }
+  if (formData.get("confirmArchive") !== "on") {
+    return { error: "Confirm that this account should be removed from the active ledger." };
+  }
+
+  const { supabase } = await requireDoctor();
+  const { error } = await supabase.rpc("archive_ledger_person", {
+    p_person_id: personId,
+    p_confirm_outstanding: formData.get("confirmOutstanding") === "on",
+  });
+  if (error) {
+    console.error("Ledger account archive failed", { code: error.code });
+    if (error.message.includes("outstanding dues")) {
+      return { error: "This account has outstanding dues. Confirm the warning before archiving; the balance will not be cleared." };
+    }
+    return { error: "This account could not be archived. Refresh the page and try again." };
+  }
+
+  revalidatePath("/doctor/accounts");
+  revalidatePath("/doctor/accounts/archived");
+  revalidatePath(`/doctor/accounts/${personId}`);
+  return {
+    success: "Account archived. Its history and balance are unchanged.",
+    successToken: crypto.randomUUID(),
+  };
+}
+
+export async function restoreLedgerPersonAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const personId = String(formData.get("ledgerPersonId") ?? "");
+  if (!uuid.safeParse(personId).success) {
+    return { error: "Check the account and try again." };
+  }
+  if (formData.get("confirmRestore") !== "on") {
+    return { error: "Confirm that this account should return to the active ledger." };
+  }
+
+  const { supabase } = await requireDoctor();
+  const { error } = await supabase.rpc("restore_ledger_person", {
+    p_person_id: personId,
+    p_confirm_restore: true,
+  });
+  if (error) {
+    console.error("Ledger account restore failed", { code: error.code });
+    return { error: "This account could not be restored. Refresh the page and try again." };
+  }
+
+  revalidatePath("/doctor/accounts");
+  revalidatePath("/doctor/accounts/archived");
+  revalidatePath(`/doctor/accounts/${personId}`);
+  return {
+    success: "Account restored to the active Udhaar Ledger.",
     successToken: crypto.randomUUID(),
   };
 }

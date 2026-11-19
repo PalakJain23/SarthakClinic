@@ -3,7 +3,7 @@ import Link from "next/link";
 import {
   LedgerEntryForm,
   PatientDetailsForm,
-  ReverseLedgerForm,
+  CorrectLedgerTransaction,
   VisitForm,
 } from "@/components/doctor-forms";
 import { formatDate, formatRupees } from "@/lib/format";
@@ -22,6 +22,17 @@ type LedgerPageEntry = {
   running_balance: number | string;
   total_count: number | string;
 };
+
+function ledgerEntryLabel(type: string) {
+  switch (type) {
+    case "opening_balance": return "Old dues";
+    case "charge": return "Udhaar";
+    case "payment": return "Payment";
+    case "reversal": return "Canceled transaction";
+    case "correction": return "Correction";
+    default: return type;
+  }
+}
 
 export default async function PatientProfilePage({
   params,
@@ -188,7 +199,7 @@ export default async function PatientProfilePage({
                       return (
                         <tr key={entry.id} className="align-top">
                           <td className="p-3">{new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" }).format(new Date(entry.effective_at))}</td>
-                          <td className="p-3">{entry.entry_type}</td>
+                          <td className="p-3">{ledgerEntryLabel(entry.entry_type)}</td>
                           <td className="p-3">{entry.description}</td>
                           <td className="p-3">{amount > 0n ? formatRupees(amount) : "—"}</td>
                           <td className="p-3">{amount < 0n ? formatRupees(-amount) : "—"}</td>
@@ -196,7 +207,15 @@ export default async function PatientProfilePage({
                           <td className="p-3">
                             {entry.correction_reason && <p className="max-w-40 text-xs text-slate-600">{entry.correction_reason}</p>}
                             {entry.entry_type !== "reversal" && !entry.has_reversal && (
-                              <ReverseLedgerForm patientId={patientId} entryId={entry.id} />
+                              <CorrectLedgerTransaction
+                                patientId={patientId}
+                                entryId={entry.id}
+                                entryType={ledgerEntryLabel(entry.entry_type)}
+                                entryDate={new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" }).format(new Date(entry.effective_at))}
+                                amountPaise={String(entry.amount_paise)}
+                                description={entry.description}
+                                expectedBalancePaise={String(balance - BigInt(entry.amount_paise))}
+                              />
                             )}
                           </td>
                         </tr>

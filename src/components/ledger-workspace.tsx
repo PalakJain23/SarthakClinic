@@ -1,69 +1,56 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  Plus,
   Search,
-  UserRound,
   Wallet,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  createPatientAction,
-  loadLedgerPatientSummaryAction,
-  recordLedgerAction,
+  recordLedgerPersonAction,
   type FormActionState,
-  type LedgerPatientSummary,
 } from "@/app/doctor/actions";
-import { formatDate, formatRupees, indiaDate } from "@/lib/format";
+import { formatRupees, indiaDate } from "@/lib/format";
 
-export type LedgerPatientRow = {
+export type LedgerPersonRow = {
   id: string;
   fullName: string;
-  mobile: string;
+  mobile: string | null;
+  totalUdhaarPaise: string;
+  totalPaidPaise: string;
   balancePaise: string;
-  lastVisit: string | null;
-  lastTransaction: string | null;
+};
+
+export type LedgerPersonOption = {
+  id: string;
+  fullName: string;
+  mobile: string | null;
+  balancePaise: string;
 };
 
 export type LedgerTotals = {
   outstandingPaise: string;
   patientsWithBalance: number;
-  creditChargesPaise: string;
-  openingDuesPaise: string;
+  totalUdhaarPaise: string;
   collectedPaise: string;
 };
 
 const initialState: FormActionState = {};
 const pageSize = 10;
 
-function initials(name: string) {
-  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase();
-}
-
-function balanceLabel(balanceValue: string) {
-  const balance = BigInt(balanceValue);
-  if (balance > 0n) return { text: `Due ${formatRupees(balance)}`, style: "text-amber-800" };
-  if (balance < 0n) return { text: `Credit ${formatRupees(-balance)}`, style: "text-emerald-800" };
-  return { text: "Settled", style: "text-slate-600" };
-}
-
-function dateTime(value: string) {
-  return new Intl.DateTimeFormat("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
+function isDue(balancePaise: string) {
+  return BigInt(balancePaise) > 0n;
 }
 
 export function LedgerWorkspace({
-  patients,
-  patientOptions,
+  people,
+  personOptions,
   totalCount,
   page,
   search,
@@ -71,11 +58,11 @@ export function LedgerWorkspace({
   sort,
   direction,
   totals,
-  initialSummary,
+  initialPersonId,
   autoTransaction,
 }: {
-  patients: LedgerPatientRow[];
-  patientOptions: { id: string; fullName: string; mobile: string }[];
+  people: LedgerPersonRow[];
+  personOptions: LedgerPersonOption[];
   totalCount: number;
   page: number;
   search: string;
@@ -83,50 +70,22 @@ export function LedgerWorkspace({
   sort: string;
   direction: string;
   totals: LedgerTotals;
-  initialSummary: LedgerPatientSummary | null;
+  initialPersonId: string;
   autoTransaction: "charge" | "payment" | null;
 }) {
   const router = useRouter();
-  const [selectedId, setSelectedId] = useState(initialSummary?.patient.id ?? patients[0]?.id ?? "");
-  const [summary, setSummary] = useState(initialSummary);
-  const [summaryError, setSummaryError] = useState("");
   const [transactionType, setTransactionType] = useState<"charge" | "payment">(autoTransaction ?? "charge");
   const [transactionOpen, setTransactionOpen] = useState(Boolean(autoTransaction));
-  const [pending, startTransition] = useTransition();
-
-  const choosePatient = useCallback((patientId: string) => {
-    setSelectedId(patientId);
-    setSummary(null);
-    setSummaryError("");
-    startTransition(async () => {
-      try {
-        const result = await loadLedgerPatientSummaryAction(patientId);
-        setSummary(result);
-        if (!result) setSummaryError("This patient record is no longer available.");
-      } catch {
-        setSummary(null);
-        setSummaryError("Could not load this patient’s ledger summary. Refresh and try again.");
-      }
-    });
-  }, [startTransition]);
 
   function openTransaction(type: "charge" | "payment") {
     setTransactionType(type);
     setTransactionOpen(true);
   }
 
-  const transactionSaved = useCallback((patientId: string) => {
+  function transactionSaved() {
+    setTransactionOpen(false);
     router.refresh();
-    startTransition(async () => {
-      try {
-        const result = await loadLedgerPatientSummaryAction(patientId);
-        setSelectedId(patientId);
-        setSummary(result);
-      } catch {
-        setSummaryError("The transaction was saved, but the refreshed summary could not be loaded.");
-      }
-    });
-  }, [router, startTransition]);
+  }
 
   const params = new URLSearchParams();
   if (search) params.set("q", search);
@@ -144,111 +103,140 @@ export function LedgerWorkspace({
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-emerald-700">Patient accounts · all-time totals · Asia/Kolkata</p>
+          <p className="text-sm font-medium text-emerald-700">All-time totals · Asia/Kolkata</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-950">Udhaar Ledger</h1>
-          <p className="mt-1 text-slate-600">Balances are calculated from opening dues, charges, payments, and signed corrections.</p>
+          <p className="mt-1 text-slate-600">See every account’s credit, payments, and remaining dues.</p>
         </div>
-        <button type="button" onClick={() => openTransaction("charge")} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-4 font-semibold text-white hover:bg-emerald-800">
-          <CircleDollarSign size={18} aria-hidden="true" /> Add Transaction
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/doctor/accounts/archived" className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50">
+            Archived accounts
+          </Link>
+          <button type="button" onClick={() => openTransaction("charge")} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-4 font-semibold text-white hover:bg-emerald-800">
+            <CircleDollarSign size={18} aria-hidden="true" /> Add Udhaar
+          </button>
+          <button type="button" onClick={() => openTransaction("payment")} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-emerald-300 bg-white px-4 font-semibold text-emerald-800 hover:bg-emerald-50">
+            <Wallet size={18} aria-hidden="true" /> Payment Received
+          </button>
+        </div>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="All-time ledger summary">
-        <Metric label="Total Outstanding" note="Positive current patient balances" value={formatRupees(totals.outstandingPaise)} />
-        <Metric label="Patients with Balance" note="Patients with a positive current balance" value={String(totals.patientsWithBalance)} />
-        <Metric label="Total Given on Credit" note={`Net charges; opening dues separately ${formatRupees(totals.openingDuesPaise)}`} value={formatRupees(totals.creditChargesPaise)} />
-        <Metric label="Total Collected" note="Net recorded payments after reversals" value={formatRupees(totals.collectedPaise)} />
+        <Metric label="Total Outstanding" note="Positive current account balances" value={formatRupees(totals.outstandingPaise)} />
+        <Metric label="Accounts with Balance" note="Accounts with positive remaining dues" value={String(totals.patientsWithBalance)} />
+        <Metric label="Total Given on Credit" note="Opening dues, Udhaar, and net credit adjustments" value={formatRupees(totals.totalUdhaarPaise)} />
+        <Metric label="Total Collected" note="Payments net of reversals" value={formatRupees(totals.collectedPaise)} />
       </section>
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(290px,0.8fr)]">
-        <section className="min-w-0 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-50 p-4 sm:p-5">
-            <div><h2 className="text-lg font-bold text-slate-950">Udhaar Ledger</h2><p className="mt-1 text-sm text-slate-500">{totalCount} matching patient{totalCount === 1 ? "" : "s"}</p></div>
-            <button type="button" onClick={() => openTransaction("charge")} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-emerald-300 px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"><CircleDollarSign size={16} />Add Transaction</button>
+      <section className="min-w-0 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-50 p-4 sm:p-5">
+          <div>
+            <h2 className="text-lg font-bold text-slate-950">Udhaar Ledger</h2>
+            <p className="mt-1 text-sm text-slate-500">{totalCount} matching {totalCount === 1 ? "person" : "people"}</p>
           </div>
-          <form method="get" className="grid gap-3 border-b border-slate-100 bg-emerald-50/40 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end">
-            <label className="text-xs font-semibold text-slate-700">Search by patient name or phone
-              <span className="relative mt-1 block"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input name="q" defaultValue={search} placeholder="Search patients…" className="min-h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm font-normal" /></span>
-            </label>
-            <label className="text-xs font-semibold text-slate-700">Balance
-              <select name="balance" defaultValue={balanceFilter} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal"><option value="all">All balances</option><option value="due">Has due</option><option value="credit">Patient credit</option><option value="settled">Settled</option></select>
-            </label>
-            <label className="text-xs font-semibold text-slate-700">Sort by
-              <select name="sort" defaultValue={sort} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal"><option value="name">Patient name</option><option value="balance">Current balance</option><option value="last_visit">Last visit</option></select>
-            </label>
-            <div className="flex gap-2">
-              <label className="sr-only" htmlFor="ledger-direction">Sort direction</label>
-              <select id="ledger-direction" name="direction" defaultValue={direction} aria-label="Sort direction" className="min-h-10 min-w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-              <button className="min-h-10 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white">Apply</button>
-            </div>
-          </form>
+        </div>
+        <form method="get" className="grid gap-3 border-b border-slate-100 bg-emerald-50/40 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-end">
+          <label className="text-xs font-semibold text-slate-700">Search by name or phone
+            <span className="relative mt-1 block"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input name="q" defaultValue={search} placeholder="Search people…" className="min-h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm font-normal" /></span>
+          </label>
+          <label className="text-xs font-semibold text-slate-700">Balance
+            <select name="balance" defaultValue={balanceFilter} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal">
+              <option value="all">All balances</option><option value="due">Has due</option><option value="credit">Account credit</option><option value="settled">Settled</option>
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-700">Sort by
+            <select name="sort" defaultValue={sort} className="mt-1 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal">
+              <option value="name">Name</option><option value="udhaar">Total Udhaar</option><option value="paid">Total paid</option><option value="balance">Remaining dues</option>
+            </select>
+          </label>
+          <div className="flex gap-2">
+            <label className="sr-only" htmlFor="ledger-direction">Sort direction</label>
+            <select id="ledger-direction" name="direction" defaultValue={direction} aria-label="Sort direction" className="min-h-10 min-w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+              <option value="asc">Ascending</option><option value="desc">Descending</option>
+            </select>
+            <button className="min-h-10 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white">Apply</button>
+          </div>
+        </form>
 
-          {patients.length === 0 ? (
-            <p className="p-6 text-slate-600">{search || balanceFilter !== "all" ? "No patients match these filters." : "No patient records yet."}</p>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="bg-emerald-50 text-slate-700"><tr>
-                    <th className="px-4 py-3 font-semibold">Patient Name</th>
-                    <th className="px-4 py-3 font-semibold">Current Outstanding</th>
-                    <th className="px-4 py-3 font-semibold">Last Visit</th>
-                    <th className="px-4 py-3 font-semibold">Last Transaction</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold">Actions</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {patients.map((patient) => {
-                      const balance = balanceLabel(patient.balancePaise);
-                      const active = selectedId === patient.id;
-                      return <tr key={patient.id} className={`${active ? "bg-emerald-50/70" : "hover:bg-slate-50"}`}>
-                        <td className="px-4 py-4">
-                          <button type="button" onClick={() => choosePatient(patient.id)} className="text-left font-semibold text-slate-950 hover:text-emerald-800">{patient.fullName}</button>
-                          <p className="mt-1 text-xs text-slate-500">{patient.mobile}</p>
-                        </td>
-                        <td className={`px-4 py-4 font-semibold ${balance.style}`}>{balance.text}</td>
-                        <td className="px-4 py-4 text-slate-600">{patient.lastVisit ? formatDate(patient.lastVisit) : "No visit recorded"}</td>
-                        <td className="px-4 py-4 text-slate-600">{patient.lastTransaction ? dateTime(patient.lastTransaction) : "—"}</td>
-                        <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${BigInt(patient.balancePaise) > 0n ? "bg-amber-100 text-amber-800" : BigInt(patient.balancePaise) < 0n ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>{BigInt(patient.balancePaise) > 0n ? "Due" : BigInt(patient.balancePaise) < 0n ? "Credit" : "Settled"}</span></td>
-                        <td className="px-4 py-4"><div className="flex gap-2">
-                          <button type="button" onClick={() => { choosePatient(patient.id); }} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold hover:bg-emerald-50">View</button>
-                          <Link href={`/doctor/patients/${patient.id}?tab=account`} className="min-h-9 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-emerald-50">History</Link>
-                        </div></td>
-                      </tr>;
-                    })}
-                  </tbody>
-                </table>
+        {people.length === 0 ? (
+          <p className="p-6 text-slate-600">{search || balanceFilter !== "all" ? "No people match these filters." : "No Udhaar accounts yet. Add Udhaar to create the first account."}</p>
+        ) : (
+          <>
+            <div className="hidden overflow-x-auto xl:block">
+              <table className="w-full min-w-[850px] text-left text-sm">
+                <thead className="bg-emerald-50 text-slate-700"><tr>
+                  <th className="w-14 px-3 py-3 font-semibold">No.</th>
+                  <th className="px-3 py-3 font-semibold">Name</th>
+                  <th className="px-3 py-3 font-semibold">Phone Number</th>
+                  <th className="px-3 py-3 font-semibold">Total Udhaar</th>
+                  <th className="px-3 py-3 font-semibold">Total Paid</th>
+                  <th className="px-3 py-3 font-semibold">Remaining Dues</th>
+                  <th className="px-3 py-3 font-semibold">Status</th>
+                  <th className="px-3 py-3 font-semibold">Action</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {people.map((person, index) => {
+                    const due = isDue(person.balancePaise);
+                    return (
+                      <tr key={person.id} className="hover:bg-slate-50">
+                        <td className="px-3 py-4 text-slate-500">{(page - 1) * pageSize + index + 1}</td>
+                        <td className="px-3 py-4 font-semibold text-slate-950">{person.fullName}</td>
+                        <td className="px-3 py-4 text-slate-600">{person.mobile || "Not provided"}</td>
+                        <td className="px-3 py-4 font-medium text-slate-800">{formatRupees(person.totalUdhaarPaise)}</td>
+                        <td className="px-3 py-4 font-medium text-slate-800">{formatRupees(person.totalPaidPaise)}</td>
+                        <td className={`px-3 py-4 font-semibold ${due ? "text-amber-800" : "text-slate-700"}`}>{formatRupees(person.balancePaise)}</td>
+                        <td className="px-3 py-4"><Status due={due} /></td>
+                        <td className="px-3 py-4"><ViewButton personId={person.id} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <ul className="divide-y divide-slate-100 xl:hidden">
+              {people.map((person, index) => {
+                const due = isDue(person.balancePaise);
+                return (
+                  <li key={person.id} className="space-y-3 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0"><p className="text-xs text-slate-500">No. {(page - 1) * pageSize + index + 1}</p><p className="mt-1 break-words font-semibold text-slate-950">{person.fullName}</p><p className="mt-1 text-sm text-slate-600">{person.mobile || "Not provided"}</p></div>
+                      <Status due={due} />
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3 text-sm">
+                      <MobileAmount label="Total Udhaar" value={formatRupees(person.totalUdhaarPaise)} />
+                      <MobileAmount label="Total Paid" value={formatRupees(person.totalPaidPaise)} />
+                      <MobileAmount label="Remaining Dues" value={formatRupees(person.balancePaise)} />
+                      <div className="flex items-end justify-end"><ViewButton personId={person.id} /></div>
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+            <nav aria-label="Udhaar ledger pagination" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 p-4 text-sm">
+              <span className="text-slate-600">Showing {Math.min((page - 1) * pageSize + 1, totalCount)}–{Math.min(page * pageSize, totalCount)} of {totalCount}</span>
+              <div className="flex gap-2">
+                <Link aria-disabled={page <= 1} tabIndex={page <= 1 ? -1 : undefined} href={pageHref(Math.max(1, page - 1))} className={`inline-flex min-h-9 items-center gap-1 rounded-lg border px-3 font-semibold ${page <= 1 ? "pointer-events-none border-slate-100 text-slate-300" : "border-slate-200 text-slate-700 hover:bg-emerald-50"}`}><ChevronLeft size={16} />Previous</Link>
+                <span className="inline-flex min-h-9 items-center px-2 text-slate-600">Page {page} of {totalPages}</span>
+                <Link aria-disabled={page >= totalPages} tabIndex={page >= totalPages ? -1 : undefined} href={pageHref(Math.min(totalPages, page + 1))} className={`inline-flex min-h-9 items-center gap-1 rounded-lg border px-3 font-semibold ${page >= totalPages ? "pointer-events-none border-slate-100 text-slate-300" : "border-slate-200 text-slate-700 hover:bg-emerald-50"}`}>Next<ChevronRight size={16} /></Link>
               </div>
-              <nav aria-label="Patient ledger pagination" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 p-4 text-sm">
-                <span className="text-slate-600">Showing {Math.min((page - 1) * pageSize + 1, totalCount)}–{Math.min(page * pageSize, totalCount)} of {totalCount}</span>
-                <div className="flex gap-2">
-                  <Link aria-disabled={page <= 1} tabIndex={page <= 1 ? -1 : undefined} href={pageHref(Math.max(1, page - 1))} className={`inline-flex min-h-9 items-center gap-1 rounded-lg border px-3 font-semibold ${page <= 1 ? "pointer-events-none border-slate-100 text-slate-300" : "border-slate-200 text-slate-700 hover:bg-emerald-50"}`}><ChevronLeft size={16} />Previous</Link>
-                  <span className="inline-flex min-h-9 items-center px-2 text-slate-600">Page {page} of {totalPages}</span>
-                  <Link aria-disabled={page >= totalPages} tabIndex={page >= totalPages ? -1 : undefined} href={pageHref(Math.min(totalPages, page + 1))} className={`inline-flex min-h-9 items-center gap-1 rounded-lg border px-3 font-semibold ${page >= totalPages ? "pointer-events-none border-slate-100 text-slate-300" : "border-slate-200 text-slate-700 hover:bg-emerald-50"}`}>Next<ChevronRight size={16} /></Link>
-                </div>
-              </nav>
-            </>
-          )}
-        </section>
-
-        <aside className="min-w-0 rounded-2xl border border-emerald-100 bg-white shadow-sm">
-          {summary ? <PatientSummary summary={summary} loading={pending} onAddCharge={() => openTransaction("charge")} onAddPayment={() => openTransaction("payment")} /> : (
-            <div className="p-5">
-              <h2 className="text-lg font-bold">Patient Summary</h2>
-              <p role={summaryError ? "alert" : "status"} className="mt-4 text-sm text-slate-600">{summaryError || (pending ? "Loading patient summary…" : "Select a patient to view their account.")}</p>
-            </div>
-          )}
-        </aside>
-      </div>
+            </nav>
+          </>
+        )}
+      </section>
 
       {transactionOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) setTransactionOpen(false); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="transaction-heading" className="max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6">
             <div className="mb-5 flex items-start justify-between gap-3">
-              <div><h2 id="transaction-heading" className="text-xl font-bold">Add Transaction</h2><p className="mt-1 text-sm text-slate-600">Financial entries are immutable; the current balance is calculated from the ledger.</p></div>
+              <div><h2 id="transaction-heading" className="text-xl font-bold">{transactionType === "payment" ? "Payment Received" : "Add Udhaar"}</h2><p className="mt-1 text-sm text-slate-600">Transactions are saved securely and balances are calculated from the ledger.</p></div>
               <button type="button" onClick={() => setTransactionOpen(false)} aria-label="Close" className="flex size-10 items-center justify-center rounded-lg border border-slate-200"><X size={18} /></button>
             </div>
-            <TransactionForm patients={patientOptions} ledgerPatients={patients} selectedId={selectedId} selectedSummary={summary} initialType={transactionType} onPatientChange={choosePatient} onSaved={transactionSaved} />
+            <TransactionForm
+              key={transactionType}
+              people={personOptions}
+              initialPersonId={initialPersonId}
+              initialType={transactionType}
+              onSaved={transactionSaved}
+            />
           </section>
         </div>
       )}
@@ -264,125 +252,162 @@ function Metric({ label, note, value }: { label: string; note: string; value: st
   </article>;
 }
 
-function PatientSummary({ summary, loading, onAddCharge, onAddPayment }: { summary: LedgerPatientSummary; loading: boolean; onAddCharge: () => void; onAddPayment: () => void }) {
-  const balance = BigInt(summary.balancePaise);
-  const label = balance > 0n ? "Current Outstanding" : balance < 0n ? "Patient Credit" : "Current Balance";
-  return <div aria-busy={loading}>
-    <header className="border-b border-emerald-50 p-5">
-      <div className="flex items-center gap-3">
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 font-bold text-emerald-800">{initials(summary.patient.fullName) || <UserRound size={20} />}</span>
-        <div className="min-w-0"><h2 className="truncate text-lg font-bold text-slate-950">Patient Summary</h2><p className="truncate font-semibold">{summary.patient.fullName}</p><p className="text-sm text-slate-600">{summary.patient.mobile}</p></div>
-      </div>
-    </header>
-    <div className="space-y-4 p-5">
-      <div className="grid grid-cols-2 gap-3">
-        <Amount label="Opening dues" value={formatRupees(summary.openingDuesPaise)} />
-        <Amount label="Net charges" value={formatRupees(summary.chargesPaise)} />
-        <Amount label="Net payments" value={formatRupees(summary.paymentsPaise)} />
-        <div className="col-span-2 rounded-xl bg-emerald-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-900">{label}</p><p className={`mt-1 text-2xl font-bold ${balance < 0n ? "text-emerald-800" : "text-slate-950"}`}>{formatRupees(balance < 0n ? -balance : balance)}</p>{balance < 0n && <p className="mt-1 text-xs text-emerald-800">Patient credit is shown separately from outstanding dues.</p>}</div>
-      </div>
-      <div>
-        <h3 className="font-bold text-slate-900">Recent Transactions</h3>
-        {summary.recentEntries.length === 0 ? <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">No transactions recorded.</p> : (
-          <ul className="mt-2 divide-y divide-slate-100">
-            {summary.recentEntries.map((entry) => {
-              const amount = BigInt(entry.amountPaise);
-              return <li key={entry.id} className="flex items-start justify-between gap-3 py-3 text-sm">
-                <div className="min-w-0"><p className="truncate font-medium text-slate-800">{entry.description}</p><p className="mt-1 text-xs text-slate-500">{dateTime(entry.effectiveAt)} · {entry.entryType.replaceAll("_", " ")}</p></div>
-                <strong className={`shrink-0 ${amount < 0n ? "text-emerald-800" : "text-slate-900"}`}>{amount > 0n ? "+" : "−"}{formatRupees(amount < 0n ? -amount : amount)}</strong>
-              </li>;
-            })}
-          </ul>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={onAddCharge} className="min-h-10 rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white">Add Udhaar</button>
-        <button type="button" onClick={onAddPayment} className="min-h-10 rounded-lg border border-emerald-300 px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50">Add Payment</button>
-        <Link href={`/doctor/patients/${summary.patient.id}?tab=account`} className="col-span-2 min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold hover:bg-slate-50">View History</Link>
-      </div>
-    </div>
-  </div>;
+function Status({ due }: { due: boolean }) {
+  return <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${due ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+    {due ? "Due" : "Paid"}
+  </span>;
 }
 
-function Amount({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border border-slate-100 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-bold text-slate-900">{value}</p></div>;
+function ViewButton({ personId }: { personId: string }) {
+  return <Link href={`/doctor/accounts/${personId}`} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-emerald-300 px-3 text-xs font-semibold text-emerald-900 hover:bg-emerald-50">View</Link>;
 }
 
-function TransactionForm({ patients: initialPatients, ledgerPatients, selectedId, selectedSummary, initialType, onPatientChange, onSaved }: { patients: { id: string; fullName: string; mobile: string }[]; ledgerPatients: LedgerPatientRow[]; selectedId: string; selectedSummary: LedgerPatientSummary | null; initialType: "charge" | "payment"; onPatientChange: (id: string) => void; onSaved: (id: string) => void }) {
-  const [state, action, pending] = useActionState(recordLedgerAction, initialState);
-  const [patientState, setPatientState] = useState<FormActionState>({});
-  const [patientPending, setPatientPending] = useState(false);
+function MobileAmount({ label, value }: { label: string; value: string }) {
+  return <div><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 font-semibold text-slate-900">{value}</dd></div>;
+}
+
+function TransactionForm({
+  people,
+  initialPersonId,
+  initialType,
+  onSaved,
+  allowNewPerson = true,
+}: {
+  people: LedgerPersonOption[];
+  initialPersonId: string;
+  initialType: "charge" | "payment";
+  onSaved: () => void;
+  allowNewPerson?: boolean;
+}) {
+  const [state, action, pending] = useActionState(recordLedgerPersonAction, initialState);
   const keyRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const patientFormRef = useRef<HTMLFormElement>(null);
-  const [patientId, setPatientId] = useState(selectedId);
-  const [patients, setPatients] = useState(initialPatients);
-  const [addingPatient, setAddingPatient] = useState(false);
-  const [entryType, setEntryType] = useState<"opening_balance" | "charge" | "payment">(initialType);
-  useEffect(() => { if (state.successToken) { if (keyRef.current) keyRef.current.value = crypto.randomUUID(); formRef.current?.reset(); onSaved(patientId); } }, [state.successToken, patientId, onSaved]);
-  async function addPatient(formData: FormData) {
-    setPatientPending(true);
-    try {
-      const result = await createPatientAction(initialState, formData);
-      setPatientState(result);
-      if (!result.patient) return;
-      const patient = result.patient;
-      setPatients((current) => current.some((item) => item.id === patient.id) ? current : [...current, patient]);
-      setPatientId(patient.id);
-      onPatientChange(patient.id);
-      patientFormRef.current?.reset();
-      setAddingPatient(false);
-    } finally {
-      setPatientPending(false);
-    }
+  const firstOption = initialPersonId && people.some((person) => person.id === initialPersonId)
+    ? initialPersonId
+    : "";
+  const [personChoice, setPersonChoice] = useState(firstOption || (allowNewPerson && initialType === "charge" ? "new" : ""));
+  useEffect(() => {
+    if (!state.successToken) return;
+    if (keyRef.current) keyRef.current.value = crypto.randomUUID();
+    formRef.current?.reset();
+    onSaved();
+  }, [state.successToken, onSaved]);
+  function prepareIdempotency() {
+    if (keyRef.current && !keyRef.current.value) keyRef.current.value = crypto.randomUUID();
   }
-  function setKey() { if (keyRef.current && !keyRef.current.value) keyRef.current.value = crypto.randomUUID(); }
-  const selectedPatient = patients.find((patient) => patient.id === patientId);
-  const selectedBalance = ledgerPatients.find((patient) => patient.id === patientId);
-  const displayedBalance = selectedSummary?.patient.id === patientId
-    ? BigInt(selectedSummary.balancePaise)
-    : selectedBalance
-      ? BigInt(selectedBalance.balancePaise)
-      : null;
-  const balanceText = displayedBalance === null
-    ? "Loading latest balance…"
-    : displayedBalance > 0n
-      ? `Due ${formatRupees(displayedBalance)}`
-      : displayedBalance < 0n
-        ? `Patient credit ${formatRupees(-displayedBalance)}`
-        : "Settled · ₹0.00";
-  return <>
-    <label className="block text-sm font-semibold">Select patient
-      <select name="patientId" form="ledger-entry-form" value={patientId} onChange={(event) => { setPatientId(event.target.value); onPatientChange(event.target.value); }} required className="field-control"><option value="">Select a patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.fullName} · {patient.mobile}</option>)}</select>
-    </label>
-    <button type="button" onClick={() => setAddingPatient((open) => !open)} className="text-sm font-semibold text-emerald-800 underline underline-offset-2">{addingPatient ? "Cancel adding patient" : "Add a new patient"}</button>
-    {addingPatient && <form ref={patientFormRef} action={addPatient} className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 sm:grid-cols-2">
-      <p className="text-sm text-slate-600 sm:col-span-2">Patient details only—no appointment, visit, or medical notes are required. If this patient is already listed, select that record above.</p>
-      <label className="text-sm font-semibold">Patient name <input name="fullName" required maxLength={120} className="field-control" /></label>
-      <label className="text-sm font-semibold">Mobile number <input name="mobile" type="tel" required maxLength={18} className="field-control" /></label>
-      {patientState.error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800 sm:col-span-2">{patientState.error}</p>}
-      <button disabled={patientPending} className="min-h-10 rounded-lg border border-emerald-300 px-3 text-sm font-semibold text-emerald-900 disabled:opacity-50 sm:col-span-2">{patientPending ? "Adding patient…" : "Add patient and select"}</button>
-    </form>}
-    <form id="ledger-entry-form" ref={formRef} action={action} onSubmit={setKey} className="space-y-4">
+
+  const selectedPerson = people.find((person) => person.id === personChoice);
+  const selectedBalance = selectedPerson ? BigInt(selectedPerson.balancePaise) : 0n;
+  const isNewPerson = allowNewPerson && personChoice === "new";
+  return (
+    <form ref={formRef} action={action} onSubmit={prepareIdempotency} className="space-y-4">
       <input ref={keyRef} type="hidden" name="idempotencyKey" />
-      {selectedPatient && <div className="rounded-xl bg-emerald-50 p-4 text-sm"><p className="font-semibold text-slate-950">{selectedPatient.fullName} · {selectedPatient.mobile}</p><p className="mt-1 text-slate-600">Balance before saving: <strong className="text-slate-900">{balanceText}</strong></p><p className="mt-1 text-xs text-slate-500">The latest patient balance is rechecked atomically by the database when saved.</p></div>}
-      <label className="block text-sm font-semibold">Transaction type
-        <select name="entryType" value={entryType} onChange={(event) => setEntryType(event.target.value === "payment" ? "payment" : event.target.value === "opening_balance" ? "opening_balance" : "charge")} className="field-control"><option value="opening_balance">Opening dues</option><option value="charge">Charge / Udhaar</option><option value="payment">Payment</option></select>
+      <input type="hidden" name="entryType" value={initialType} />
+      <label className="block text-sm font-semibold">Person
+        <select name="personChoice" value={personChoice} onChange={(event) => setPersonChoice(event.target.value)} required className="field-control">
+          <option value="" disabled>{people.length ? "Select a person" : "No accounts available"}</option>
+          {people.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.mobile || "No phone"}</option>)}
+          {allowNewPerson && initialType === "charge" && <option value="new">Add a new person</option>}
+        </select>
       </label>
+      {isNewPerson ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="text-sm font-semibold">Name
+            <input name="fullName" required maxLength={120} className="field-control" autoComplete="name" />
+          </label>
+          <label className="text-sm font-semibold">Phone number <span className="font-normal text-slate-500">(optional)</span>
+            <input name="mobile" type="tel" maxLength={18} className="field-control" autoComplete="tel" />
+          </label>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-emerald-50 p-4 text-sm">
+          <p className="font-semibold text-slate-950">{selectedPerson?.fullName ?? "Select a person"}</p>
+          {initialType === "payment" && <p className="mt-1 text-slate-600">Outstanding balance: <strong className="text-slate-900">{formatRupees(selectedBalance > 0n ? selectedBalance : 0n)}</strong></p>}
+          <p className="mt-1 text-xs text-slate-500">{initialType === "payment" ? "Partial and full payments are accepted; payments above the current balance are rejected." : selectedPerson?.mobile || "Not provided"}</p>
+        </div>
+      )}
       <label className="block text-sm font-semibold">Amount (₹)
         <input name="amount" type="number" min="0.01" step="0.01" inputMode="decimal" required className="field-control" placeholder="0.00" />
       </label>
-      <label className="block text-sm font-semibold">Effective date
+      <label className="block text-sm font-semibold">{initialType === "payment" ? "Payment date" : "Udhaar date"}
         <input name="effectiveDate" type="date" required defaultValue={indiaDate()} className="field-control" />
       </label>
-      <label className="block text-sm font-semibold">Description (optional)
-        <input name="description" maxLength={240} className="field-control" placeholder={entryType === "payment" ? "Payment received" : entryType === "opening_balance" ? "Opening dues" : "Consultation or treatment"} />
+      <label className="block text-sm font-semibold">Note <span className="font-normal text-slate-500">(optional)</span>
+        <input name="description" maxLength={240} className="field-control" placeholder={initialType === "payment" ? "Payment received" : "Udhaar added"} />
       </label>
-      {entryType === "payment" && <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950"><input name="overpaymentConfirmed" type="checkbox" className="mt-1 size-4 accent-emerald-700" />If payment exceeds the outstanding balance, record the remainder as patient credit.</label>}
       {state.error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{state.error}</p>}
       {state.success && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{state.success}</p>}
-      <button disabled={pending || !patientId} className="min-h-11 w-full rounded-lg bg-emerald-700 px-4 font-semibold text-white disabled:opacity-50">{pending ? "Saving…" : entryType === "payment" ? "Record Payment" : entryType === "opening_balance" ? "Record Opening Dues" : "Add Udhaar"}</button>
-      {patients.length === 0 && <p className="text-sm text-amber-800">Add a patient record before posting a transaction.</p>}
+      <button disabled={pending || (initialType === "payment" && (!selectedPerson || selectedBalance <= 0n))} className="min-h-11 w-full rounded-lg bg-emerald-700 px-4 font-semibold text-white disabled:opacity-50">
+        {pending ? "Saving…" : initialType === "payment" ? "Save Payment" : "Save Udhaar"}
+      </button>
     </form>
-  </>;
+  );
+}
+
+export function LedgerPersonTransactionActions({ person }: { person: LedgerPersonOption }) {
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [transactionType, setTransactionType] = useState<"charge" | "payment">("charge");
+  const [transactionOpen, setTransactionOpen] = useState(false);
+
+  function openTransaction(type: "charge" | "payment") {
+    setTransactionType(type);
+    setMenuOpen(false);
+    setTransactionOpen(true);
+  }
+
+  function transactionSaved() {
+    setTransactionOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800"
+        >
+          <Plus size={17} aria-hidden="true" /> Add Entry
+        </button>
+        {menuOpen && (
+          <div role="menu" className="absolute right-0 z-20 mt-2 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+            <button type="button" role="menuitem" onClick={() => openTransaction("charge")} className="min-h-10 w-full rounded-lg px-3 text-left text-sm font-medium text-slate-800 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-emerald-700">Add Udhaar</button>
+            <button type="button" role="menuitem" onClick={() => openTransaction("payment")} className="min-h-10 w-full rounded-lg px-3 text-left text-sm font-medium text-slate-800 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-emerald-700">Record Payment</button>
+          </div>
+        )}
+      </div>
+      {transactionOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setTransactionOpen(false);
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="person-transaction-heading" className="max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6">
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="person-transaction-heading" className="text-xl font-bold text-slate-950">{transactionType === "payment" ? "Record Payment" : "Add Udhaar"}</h2>
+                <p className="mt-1 text-sm text-slate-600">For {person.fullName}. Saved transactions update the account balance.</p>
+              </div>
+              <button type="button" onClick={() => setTransactionOpen(false)} aria-label="Close" className="flex size-10 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700">
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <TransactionForm
+              key={transactionType}
+              people={[person]}
+              initialPersonId={person.id}
+              initialType={transactionType}
+              onSaved={transactionSaved}
+              allowNewPerson={false}
+            />
+          </section>
+        </div>
+      )}
+    </>
+  );
 }

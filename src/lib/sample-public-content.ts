@@ -2,11 +2,11 @@ import type { PublicClinicData, PublicLocation, PublicSession } from "@/lib/clin
 
 export const SAMPLE_PUBLIC_CONTENT = {
   clinicName: "Sarthak Clinic",
-  doctorName: "Dr. Subhal Singh Thakur",
-  qualification: "MBBS — sample qualification",
-  speciality: "General Physician",
-  introduction:
-    "General consultations for everyday health concerns, with clear explanations and a simple appointment process.",
+  doctorName: "Subhal Thakur",
+  qualification: "",
+  speciality: "",
+  registrationInfo: "",
+  introduction: "",
   publicPhone: "+919229681235",
   publicPhoneDisplay: "+91 92296 81235",
   publicWhatsApp: "+919229681235",
@@ -16,12 +16,6 @@ export const SAMPLE_PUBLIC_CONTENT = {
     address: "Ashta, Madhya Pradesh",
     directionsUrl: null,
   },
-  services: [
-    "General consultation",
-    "Fever, cough and cold consultation",
-    "Routine health check-ups",
-    "Follow-up visits",
-  ],
   sessions: [
     {
       id: "village-consultation",
@@ -91,16 +85,19 @@ export function getSamplePublicClinic({
     isConfigured,
     isSampleProfile: true,
     isSampleAvailability: includeSampleSessions,
+    isSampleLocations: true,
+    isSamplePhone: true,
+    isSampleWhatsApp: true,
     clinicName: SAMPLE_PUBLIC_CONTENT.clinicName,
     doctorName: SAMPLE_PUBLIC_CONTENT.doctorName,
     qualification: SAMPLE_PUBLIC_CONTENT.qualification,
     speciality: SAMPLE_PUBLIC_CONTENT.speciality,
+    registrationInfo: SAMPLE_PUBLIC_CONTENT.registrationInfo,
     introduction: SAMPLE_PUBLIC_CONTENT.introduction,
     doctorPhotoUrl: null,
     phone: SAMPLE_PUBLIC_CONTENT.publicPhone,
     whatsapp: SAMPLE_PUBLIC_CONTENT.publicWhatsApp,
     locations,
-    services: [...SAMPLE_PUBLIC_CONTENT.services],
     sessions,
   };
 }

@@ -2,35 +2,79 @@
 
 import {
   ArrowUpRight,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   HeartPulse,
   MapPin,
+  MessageCircle,
+  Menu,
   Phone,
+  Search,
   ShieldCheck,
   X,
+  UsersRound,
+  UserRound,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { PublicClinicData, PublicSession } from "@/lib/clinic-data";
 import { normalizeIndianMobile } from "@/lib/booking-schema";
-import { SAMPLE_PUBLIC_CONTENT } from "@/lib/sample-public-content";
 
 type Language = "hi" | "en";
 
+type PublishedDoctor = {
+  id: string;
+  fullName: string;
+  specialty: string;
+  doctorType: "regular" | "visiting";
+  qualification?: string | null;
+  visitingDays?: string | null;
+  visitingHours?: string | null;
+  photoUrl?: string | null;
+  profileHref?: string | null;
+};
+
 const copy = {
   hi: {
-    doctor: "डॉक्टर",
+    home: "होम",
+    doctors: "क्लिनिक संचालक",
     availability: "उपलब्धता",
     contact: "संपर्क",
-    sampleProfile: "नमूना प्रोफ़ाइल",
-    sampleQualification: "MBBS — नमूना योग्यता",
-    sampleIntroduction: "रोज़मर्रा की स्वास्थ्य समस्याओं के लिए सामान्य परामर्श, स्पष्ट जानकारी और आसान अपॉइंटमेंट प्रक्रिया।",
+    about: "हमारे बारे में",
+    heroEyebrow: "स्वास्थ्य क्लिनिक",
+    heroTitle: "गुणवत्तापूर्ण स्वास्थ्य सेवा, आपके घर के पास",
+    heroDescription:
+      "सार्थक क्लिनिक में सही डॉक्टर खोजें, उपलब्ध क्लिनिक सत्र देखें और अपॉइंटमेंट का अनुरोध करें।",
+    viewDoctors: "संचालक की प्रोफ़ाइल",
+    featureDoctorsTitle: "संचालक प्रोफ़ाइल",
+    featureDoctorsDescription: "क्लिनिक संचालक की जानकारी देखें।",
+    featureSchedulesTitle: "क्लिनिक सत्र",
+    featureSchedulesDescription: "सूचीबद्ध समय देखें।",
+    featureAppointmentsTitle: "अपॉइंटमेंट अनुरोध",
+    featureAppointmentsDescription: "अनुरोध भेजें; पुष्टि आवश्यक।",
+    featureContactTitle: "संपर्क जानकारी",
+    featureContactDescription: "क्लिनिक से संपर्क करें।",
+    heroImageDescription: "सार्थक क्लिनिक का स्वागत कक्ष और मरीजों के बैठने की जगह।",
+    openNavigation: "नेविगेशन खोलें",
+    closeNavigation: "नेविगेशन बंद करें",
+    profileInfoUnavailable: "क्लिनिक संचालक की सार्वजनिक प्रोफ़ाइल जानकारी अभी उपलब्ध नहीं है।",
     book: "मुलाक़ात का अनुरोध करें",
+    bookAppointment: "अपॉइंटमेंट बुक करें",
     call: "कॉल करें",
     whatsapp: "WhatsApp",
     contactComingSoon: "संपर्क जानकारी जल्द उपलब्ध होगी",
     today: "आज की उपलब्धता",
+    findDoctorTitle: "क्लिनिक संचालक",
+    findDoctorSubtitle: "सार्थक क्लिनिक के संचालक की सार्वजनिक प्रोफ़ाइल।",
+    viewAllDoctors: "प्रोफ़ाइल देखें",
+    regularDoctor: "नियमित डॉक्टर",
+    visitingSpecialist: "विज़िटिंग विशेषज्ञ",
+    doctorPortrait: "डॉक्टर का चित्र",
+    visitingDays: "आने के दिन",
+    visitingHours: "समय",
+    viewProfile: "प्रोफ़ाइल देखें",
     noSchedule: "उपलब्ध समय देखने के लिए कृपया फिर से जाँचें।",
     open: "बुकिंग अनुरोध खुले हैं",
     closed: "बुकिंग बंद है",
@@ -40,9 +84,37 @@ const copy = {
     sampleVillage: "ग्राम परामर्श",
     sampleClinic: "सार्थक क्लिनिक, आष्टा",
     todayDate: "भारत के समय अनुसार आज",
-    details: "डॉक्टर के बारे में",
-    services: "उपलब्ध सेवाएँ",
-    locations: "स्थान और संपर्क",
+    details: "संचालक का परिचय",
+    clinicOwner: "क्लिनिक संचालक",
+    verifiedQualifications: "सत्यापित योग्यताएँ",
+    verifiedDesignation: "सत्यापित पेशेवर पदनाम",
+    registrationInfo: "पंजीकरण जानकारी",
+    bookingGuideTitle: "अपॉइंटमेंट कैसे लें",
+    bookingStepOneTitle: "क्लिनिक सत्र देखें",
+    bookingStepOneDescription:
+      "उपलब्ध समय और स्थान देखें। अभी डॉक्टर चुनने की सुविधा उपलब्ध नहीं है।",
+    bookingStepTwoTitle: "अपॉइंटमेंट अनुरोध भेजें",
+    bookingStepTwoDescription:
+      "पसंदीदा तारीख़ और उपलब्ध सत्र चुनकर अनुरोध भेजें।",
+    bookingStepThreeTitle: "पुष्टि प्राप्त करें",
+    bookingStepThreeDescription:
+      "क्लिनिक आपके अनुरोध की समीक्षा करेगा। पुष्टि मिलने तक अपॉइंटमेंट पक्का नहीं है।",
+    bookingGuideAction: "अपॉइंटमेंट अनुरोध करें",
+    locations: "क्लिनिक की जानकारी",
+    clinicInfoDescription: "पते और क्लिनिक सत्रों की जानकारी देखें।",
+    sessionInformation: "क्लिनिक सत्र",
+    sessionInformationDescription: "उपलब्ध तारीख़, समय और स्थान देखें।",
+    clinicAddress: "क्लिनिक का पता",
+    locationUnavailable: "क्लिनिक का सत्यापित पता अभी प्रकाशित नहीं है।",
+    mapPanelTitle: "क्लिनिक का स्थान",
+    directionsUnavailable: "इस स्थान के लिए दिशा लिंक अभी उपलब्ध नहीं है।",
+    quickLinks: "त्वरित लिंक",
+    getInTouch: "संपर्क करें",
+    footerIntro: "क्लिनिक की जानकारी और अपॉइंटमेंट अनुरोध एक ही जगह पर।",
+    footerLocationUnavailable: "सत्यापित स्थान उपलब्ध नहीं है।",
+    footerContactUnavailable: "सत्यापित संपर्क जानकारी उपलब्ध नहीं है।",
+    footerPrivacyNote:
+      "अपॉइंटमेंट अनुरोध के लिए दी गई जानकारी केवल अनुरोध संभालने हेतु उपयोग होती है।",
     directions: "रास्ता देखें",
     privacy: "गोपनीयता सूचना",
     login: "डॉक्टर लॉगिन",
@@ -73,21 +145,46 @@ const copy = {
     required: "आवश्यक",
     close: "बंद करें",
     notGuaranteed: "बुकिंग अनुरोध है — डॉक्टर की पुष्टि आवश्यक है।",
-    language: "English",
     clinicName: "सार्थक क्लिनिक",
   },
   en: {
-    doctor: "Doctor",
+    home: "Home",
+    doctors: "Clinic Owner",
     availability: "Availability",
     contact: "Contact",
-    sampleProfile: "Sample profile",
-    sampleQualification: "MBBS — sample qualification",
-    sampleIntroduction: "General consultations for everyday health concerns, with clear explanations and a simple appointment process.",
+    about: "About",
+    heroEyebrow: "Healthcare Clinic",
+    heroTitle: "Quality Healthcare, Close to Home",
+    heroDescription:
+      "Find the right doctor, explore available clinic sessions, and request an appointment at Sarthak Clinic.",
+    viewDoctors: "Meet the clinic owner",
+    featureDoctorsTitle: "Owner Profile",
+    featureDoctorsDescription: "View the clinic owner’s profile.",
+    featureSchedulesTitle: "Clinic Sessions",
+    featureSchedulesDescription: "See listed visiting times.",
+    featureAppointmentsTitle: "Appointment Request",
+    featureAppointmentsDescription: "Send a visit request.",
+    featureContactTitle: "Contact Details",
+    featureContactDescription: "View available contact options.",
+    heroImageDescription: "Sarthak Clinic reception with the clinic sign and patient waiting area.",
+    openNavigation: "Open navigation",
+    closeNavigation: "Close navigation",
+    profileInfoUnavailable: "The clinic owner’s public profile has not been added yet.",
     book: "Request a Visit",
+    bookAppointment: "Book Appointment",
     call: "Call",
     whatsapp: "WhatsApp",
     contactComingSoon: "Contact details coming soon",
     today: "Today’s availability",
+    findDoctorTitle: "Clinic Owner",
+    findDoctorSubtitle: "The public profile of the Sarthak Clinic owner.",
+    viewAllDoctors: "View Profile",
+    regularDoctor: "Regular Doctor",
+    visitingSpecialist: "Visiting Specialist",
+    doctorPortrait: "Portrait of",
+    visitingDays: "Visiting days",
+    visitingHours: "Visiting hours",
+    viewProfile: "View Profile",
     noSchedule: "Please check back for available timings.",
     open: "Booking requests open",
     closed: "Bookings closed",
@@ -97,10 +194,38 @@ const copy = {
     sampleVillage: "Village consultation",
     sampleClinic: "Sarthak Clinic, Ashta",
     todayDate: "Today in India",
-    details: "About the doctor",
-    services: "Available services",
-    locations: "Locations and contact",
-    directions: "Get directions",
+    details: "About the clinic owner",
+    clinicOwner: "Clinic Owner",
+    verifiedQualifications: "Verified qualifications",
+    verifiedDesignation: "Verified professional designation",
+    registrationInfo: "Registration information",
+    bookingGuideTitle: "How to Book an Appointment",
+    bookingStepOneTitle: "Explore Clinic Sessions",
+    bookingStepOneDescription:
+      "Review available times and locations. Doctor selection is not available yet.",
+    bookingStepTwoTitle: "Request an Appointment",
+    bookingStepTwoDescription:
+      "Choose a preferred date and available session, then send your request.",
+    bookingStepThreeTitle: "Get Confirmation",
+    bookingStepThreeDescription:
+      "The clinic will review your request. It is not confirmed until you receive confirmation.",
+    bookingGuideAction: "Request Appointment",
+    locations: "Clinic Information",
+    clinicInfoDescription: "Find clinic locations and session information.",
+    sessionInformation: "Clinic sessions",
+    sessionInformationDescription: "Review available dates, times, and locations.",
+    clinicAddress: "Clinic address",
+    locationUnavailable: "A verified clinic address has not been published yet.",
+    mapPanelTitle: "Clinic location",
+    directionsUnavailable: "Directions are not available for this location yet.",
+    quickLinks: "Quick Links",
+    getInTouch: "Get in Touch",
+    footerIntro: "Clinic information and appointment requests in one place.",
+    footerLocationUnavailable: "No verified location is available.",
+    footerContactUnavailable: "No verified contact details are available.",
+    footerPrivacyNote:
+      "Information provided for an appointment request is used only to handle that request.",
+    directions: "Get Directions",
     privacy: "Privacy notice",
     login: "Doctor login",
     optionalNote: "Doctor’s note",
@@ -130,20 +255,105 @@ const copy = {
     required: "Required",
     close: "Close",
     notGuaranteed: "Visit request only — doctor confirmation is required.",
-    language: "हिन्दी",
     clinicName: "Sarthak Clinic",
   },
 } as const;
 
-const hindiServices: Record<string, string> = {
-  "General consultation": "सामान्य परामर्श",
-  "Fever, cough and cold consultation": "बुखार, खाँसी और सर्दी का परामर्श",
-  "Routine health check-ups": "नियमित स्वास्थ्य जाँच",
-  "Follow-up visits": "फ़ॉलो-अप मुलाक़ात",
-};
+// Doctor Management is local-only, so only a verified public source should populate this list.
+const publishedDoctors: PublishedDoctor[] = [];
 
-function publicText(value: string, sampleText: string, language: Language, hindiText: string) {
-  return value === sampleText && language === "hi" ? hindiText : value;
+function PublicDoctorCard({
+  doctor,
+  language,
+}: {
+  doctor: PublishedDoctor;
+  language: Language;
+}) {
+  const t = copy[language];
+  const typeLabel =
+    doctor.doctorType === "regular" ? t.regularDoctor : t.visitingSpecialist;
+
+  return (
+    <article className="flex h-full flex-col rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50 text-emerald-700">
+          {doctor.photoUrl ? (
+            <Image
+              src={doctor.photoUrl}
+              alt={`${t.doctorPortrait}: ${doctor.fullName}`}
+              fill
+              sizes="56px"
+              unoptimized
+              className="object-cover"
+            />
+          ) : (
+            <UserRound size={25} aria-hidden="true" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <span
+            className={`inline-flex max-w-full rounded-full px-2.5 py-1 text-xs font-semibold ${
+              doctor.doctorType === "regular"
+                ? "bg-emerald-50 text-emerald-800"
+                : "bg-teal-50 text-teal-800"
+            }`}
+          >
+            {typeLabel}
+          </span>
+          <h3 className="mt-2 break-words text-base font-bold leading-6 text-emerald-950">
+            {doctor.fullName}
+          </h3>
+          <p className="mt-0.5 text-sm text-slate-600">{doctor.specialty}</p>
+          {doctor.qualification && (
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {doctor.qualification}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {(doctor.visitingDays || doctor.visitingHours) && (
+        <div className="mt-4 space-y-2 border-t border-emerald-50 pt-3 text-sm text-slate-700">
+          {doctor.visitingDays && (
+            <p className="flex items-start gap-2">
+              <CalendarDays
+                className="mt-0.5 shrink-0 text-emerald-700"
+                size={16}
+                aria-hidden="true"
+              />
+              <span>
+                <span className="font-semibold">{t.visitingDays}: </span>
+                {doctor.visitingDays}
+              </span>
+            </p>
+          )}
+          {doctor.visitingHours && (
+            <p className="flex items-start gap-2">
+              <Clock3
+                className="mt-0.5 shrink-0 text-emerald-700"
+                size={16}
+                aria-hidden="true"
+              />
+              <span>
+                <span className="font-semibold">{t.visitingHours}: </span>
+                {doctor.visitingHours}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {doctor.profileHref && (
+        <a
+          href={doctor.profileHref}
+          className="mt-auto inline-flex min-h-10 items-center gap-1 pt-4 text-sm font-semibold text-emerald-800 hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+        >
+          {t.viewProfile}
+          <ArrowUpRight size={16} aria-hidden="true" />
+        </a>
+      )}
+    </article>
+  );
 }
 
 function locationText(value: string, language: Language) {
@@ -200,6 +410,30 @@ function safePhone(value: string | null, whatsapp = false) {
     : `tel:+${normalized}`;
 }
 
+function safeDirectionsUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const isGoogleMapsUrl =
+      url.hostname === "maps.app.goo.gl" ||
+      url.hostname === "maps.google.com" ||
+      (url.hostname === "www.google.com" &&
+        (url.pathname === "/maps" || url.pathname.startsWith("/maps/")));
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !isGoogleMapsUrl
+    ) {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 function phoneDisplay(value: string | null) {
   const normalized = normalizedPhone(value);
   if (!normalized) return null;
@@ -209,6 +443,7 @@ function phoneDisplay(value: string | null) {
 
 export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
   const [language, setLanguage] = useState<Language>("hi");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedSession, setSelectedSession] = useState("");
@@ -217,9 +452,16 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
   const [formMessage, setFormMessage] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const idempotencyRef = useRef({ fingerprint: "", key: "" });
   const router = useRouter();
   const t = copy[language];
+  const verifiedLocations = clinic.isSampleLocations ? [] : clinic.locations;
+  const verifiedPhone = clinic.isSamplePhone ? null : clinic.phone;
+  const verifiedWhatsApp = clinic.isSampleWhatsApp ? null : clinic.whatsapp;
+  const clinicInfoPhoneHref = safePhone(verifiedPhone);
+  const clinicInfoWhatsAppHref = safePhone(verifiedWhatsApp, true);
+  const clinicInfoPhoneDisplay = phoneDisplay(verifiedPhone);
   const today = todayIndia();
   const todaySessions = clinic.sessions.filter((session) => session.date === today);
   const dates = useMemo(
@@ -237,6 +479,18 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    function handleMenuKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", handleMenuKeyDown);
+    return () => window.removeEventListener("keydown", handleMenuKeyDown);
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     const timer = window.setInterval(() => router.refresh(), 60_000);
@@ -362,154 +616,279 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
     }
   }
 
-  const phoneHref = safePhone(clinic.phone);
-  const whatsappHref = safePhone(clinic.whatsapp, true);
-  const contactPhone = phoneDisplay(clinic.phone);
+  const navigationItems = [
+    { href: "#home", label: t.home },
+    { href: "#doctors", label: t.doctors },
+    { href: "#about", label: t.about },
+    { href: "#contact", label: t.contact },
+  ];
 
   return (
     <main className="min-h-screen pb-24 md:pb-0">
-      <header className="border-b border-[var(--border)] bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3 sm:px-6">
-          <a href="#" className="flex items-center gap-3" aria-label={clinic.clinicName || t.clinicName}>
-            <span className="flex size-11 items-center justify-center rounded-xl bg-teal-50 text-[var(--primary)]">
-              <HeartPulse aria-hidden="true" size={25} />
+      <header id="home" className="sticky top-0 z-30 border-b border-[var(--border)] bg-white/95 shadow-sm backdrop-blur">
+        <div className="home-container flex flex-wrap items-center justify-between gap-2 py-2 sm:gap-4 lg:flex-nowrap">
+          <a href="#home" className="flex shrink-0 items-center gap-2" aria-label={clinic.clinicName || t.clinicName}>
+            <span className="flex items-center justify-center text-emerald-700">
+              <HeartPulse aria-hidden="true" size={26} />
             </span>
-            <span>
-              <span className="block font-bold text-slate-900">{clinic.clinicName || t.clinicName}</span>
-            </span>
+            <span className="text-sm font-bold tracking-tight text-slate-950 sm:text-base">{clinic.clinicName || t.clinicName}</span>
           </a>
-          <div className="order-2 flex items-center gap-2 md:order-3">
-            <button
-              type="button"
-              onClick={() => setLanguage(language === "hi" ? "en" : "hi")}
-              className="min-h-11 rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              aria-label={`Switch language to ${t.language}`}
+          <nav aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"} className="hidden items-center gap-3 whitespace-nowrap text-sm font-semibold lg:flex xl:gap-5">
+            {navigationItems.map((item) => (
+              <a
+                key={item.href}
+                aria-current={item.href === "#home" ? "page" : undefined}
+                className={`rounded-sm border-b-2 px-1 py-2 transition-colors hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700 ${
+                  item.href === "#home"
+                    ? "border-emerald-700 text-emerald-800"
+                    : "border-transparent text-slate-700"
+                }`}
+                href={item.href}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <div className="ml-auto flex items-center gap-2">
+            <div
+              aria-label={language === "hi" ? "भाषा चुनें" : "Choose language"}
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5"
             >
-              {t.language}
-            </button>
+              <button
+                type="button"
+                onClick={() => setLanguage("en")}
+                aria-pressed={language === "en"}
+                className={`min-h-8 rounded-md px-2 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+                  language === "en"
+                    ? "bg-white text-emerald-800 shadow-sm"
+                    : "text-slate-600 hover:text-emerald-800"
+                }`}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage("hi")}
+                aria-pressed={language === "hi"}
+                className={`min-h-8 rounded-md px-2 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${
+                  language === "hi"
+                    ? "bg-white text-emerald-800 shadow-sm"
+                    : "text-slate-600 hover:text-emerald-800"
+                }`}
+              >
+                हिन्दी
+              </button>
+            </div>
             <button
               type="button"
               onClick={openBooking}
-              className="hidden min-h-11 rounded-lg bg-[var(--primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--primary-dark)] sm:inline-flex"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-4"
             >
-              {t.book}
+              <CalendarDays size={17} aria-hidden="true" />
+              <span className="hidden sm:inline">{t.bookAppointment}</span>
+              <span className="sr-only sm:hidden">{t.bookAppointment}</span>
+            </button>
+            <button
+              ref={menuButtonRef}
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              aria-label={mobileMenuOpen ? t.closeNavigation : t.openNavigation}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-primary-navigation"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--border)] text-slate-700 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 lg:hidden"
+            >
+              {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             </button>
           </div>
-          <nav aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"} className="order-3 flex w-full items-center gap-5 overflow-x-auto whitespace-nowrap border-t border-slate-100 pt-2 text-sm font-medium text-slate-700 md:order-2 md:w-auto md:border-0 md:pt-0">
-            <a className="hover:text-[var(--primary)]" href="#doctor">{t.doctor}</a>
-            <a className="hover:text-[var(--primary)]" href="#availability">{t.availability}</a>
-            <a className="hover:text-[var(--primary)]" href="#about">{t.details}</a>
-            <a className="hover:text-[var(--primary)]" href="#services">{t.services}</a>
-            <a className="hover:text-[var(--primary)]" href="#contact">{t.contact}</a>
+          <nav
+            id="mobile-primary-navigation"
+            aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}
+            className={`${mobileMenuOpen ? "flex" : "hidden"} order-3 w-full flex-col gap-1 border-t border-emerald-100 pt-2 text-sm font-semibold text-slate-700 lg:hidden`}
+          >
+            {navigationItems.map((item) => (
+              <a
+                key={item.href}
+                className="flex min-h-11 items-center rounded-lg px-3 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                href={item.href}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {item.label}
+              </a>
+            ))}
           </nav>
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <section
-          id="doctor"
-          className="grid gap-7 py-9 md:grid-cols-[1.4fr_0.8fr] md:items-center md:py-12"
-        >
-          <div className="order-2 md:order-1">
-            <p className="mb-3 text-sm font-semibold tracking-wide text-[var(--primary)]">
-              {publicText(clinic.speciality, SAMPLE_PUBLIC_CONTENT.speciality, language, "सामान्य चिकित्सक")}
-            </p>
-            <h1 className="max-w-2xl text-3xl font-bold leading-tight tracking-tight text-slate-950 sm:text-4xl md:text-5xl">
-              {clinic.doctorName}
-            </h1>
-            {clinic.isSampleProfile && <span className="mt-2 inline-flex rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800">{t.sampleProfile}</span>}
-            <p className="mt-3 text-base font-medium text-slate-600">
-              {publicText(clinic.qualification, SAMPLE_PUBLIC_CONTENT.qualification, language, t.sampleQualification)}
-            </p>
-            <p className="mt-5 max-w-xl text-base leading-7 text-slate-700">
-              {publicText(clinic.introduction, SAMPLE_PUBLIC_CONTENT.introduction, language, t.sampleIntroduction)}
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={openBooking}
-                className="min-h-12 rounded-lg bg-[var(--primary)] px-6 font-semibold text-white hover:bg-[var(--primary-dark)]"
-              >
-                {t.book}
-              </button>
-              {phoneHref ? (
-                <a
-                  href={phoneHref}
-                  className="inline-flex min-h-12 items-center gap-2 rounded-lg border border-[var(--border)] bg-white px-5 font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  <Phone size={18} aria-hidden="true" /> {t.call}
-                </a>
-              ) : (
-                <button type="button" disabled aria-disabled="true" className="inline-flex min-h-12 cursor-not-allowed items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-5 font-semibold text-slate-400">
-                  <Phone size={18} aria-hidden="true" /> {t.call}
-                </button>
-              )}
-              {whatsappHref ? (
-                <a
-                  href={whatsappHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-12 items-center rounded-lg border border-[var(--border)] bg-white px-5 font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  {t.whatsapp}
-                </a>
-              ) : (
-                <button type="button" disabled aria-disabled="true" className="inline-flex min-h-12 cursor-not-allowed items-center rounded-lg border border-slate-200 bg-slate-50 px-5 font-semibold text-slate-400">
-                  {t.whatsapp}
-                </button>
-              )}
-            </div>
-            {phoneHref && contactPhone && (
-              <p className="mt-3 text-sm text-slate-600">
-                <a href={phoneHref} className="font-medium underline underline-offset-2">{contactPhone}</a>
+      <div className="home-container">
+        <div className="mt-4 overflow-hidden rounded-[1.75rem] border border-emerald-100 bg-white shadow-sm sm:mt-5">
+          <section
+            aria-labelledby="clinic-hero-title"
+            className="grid min-w-0 lg:grid-cols-[1.05fr_0.95fr]"
+          >
+            <div className="clinic-hero-copy order-1 min-w-0 px-5 py-7 sm:px-8 sm:py-8 lg:px-10 lg:py-8">
+              <p className="mb-3 inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800">
+                <HeartPulse size={16} aria-hidden="true" /> {t.heroEyebrow}
               </p>
-            )}
-            {!phoneHref && !whatsappHref && <p className="mt-3 text-sm text-slate-500">{t.contactComingSoon}</p>}
-          </div>
-          <div className="order-1 flex justify-center md:order-2">
-            <div
-              className="relative flex aspect-square w-48 items-center justify-center overflow-hidden rounded-[2rem] border border-teal-100 bg-gradient-to-br from-teal-50 to-cyan-100 sm:w-56 md:w-64"
-            >
-              {clinic.doctorPhotoUrl ? (
-                // This is a doctor-managed public image URL, never patient content.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={clinic.doctorPhotoUrl}
-                  alt={clinic.doctorName}
-                  referrerPolicy="no-referrer"
-                  className="size-full object-cover"
-                />
-              ) : (
-                <svg viewBox="0 0 220 220" role="img" aria-label={language === "hi" ? "डॉक्टर का चित्रित अवतार" : "Illustrated doctor avatar"} className="h-full w-full">
-                  <circle cx="110" cy="110" r="92" fill="#ccfbf1" />
-                  <path d="M37 210c4-37 33-61 73-61s69 24 73 61" fill="#0f766e" />
-                  <path d="M79 147h62l20 63H59z" fill="#fff" />
-                  <path d="M98 150h24l-12 21z" fill="#99f6e4" />
-                  <path d="M95 170h30l14 40H81z" fill="#f8fafc" />
-                  <path d="M102 171h16v13h-16z" fill="#0f766e" />
-                  <path d="M92 80c0-23 13-38 34-38 22 0 34 15 34 39v27c0 25-16 42-37 42s-37-17-37-42V80z" fill="#f2c6a0" />
-                  <path d="M83 88c-5-35 12-55 43-55 29 0 45 21 38 56-6-4-10-12-11-23-15 12-35 16-61 14-1 4-4 7-9 8z" fill="#334155" />
-                  <path d="M100 97h2m32 0h2" stroke="#334155" strokeLinecap="round" strokeWidth="4" />
-                  <path d="M104 120c4 4 8 6 13 6s9-2 13-6" fill="none" stroke="#9a5b4b" strokeLinecap="round" strokeWidth="3" />
-                  <path d="M71 178c17 3 27 13 33 32M149 178c-17 3-27 13-33 32" fill="none" stroke="#0f766e" strokeLinecap="round" strokeWidth="5" />
-                  <circle cx="110" cy="195" r="5" fill="#0f766e" />
-                </svg>
-              )}
+              <h1 id="clinic-hero-title" className="max-w-lg break-words text-3xl font-bold leading-[1.16] tracking-tight text-emerald-950 sm:text-4xl lg:text-[2.5rem]">
+                {t.heroTitle}
+              </h1>
+              <p className="mt-4 max-w-xl text-base leading-7 text-slate-600 lg:text-lg">
+                {t.heroDescription}
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2 sm:gap-3">
+                <button
+                  type="button"
+                  onClick={openBooking}
+                  className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-5"
+                >
+                  {t.bookAppointment}
+                </button>
+                <a href="#doctors" className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-emerald-200 bg-white px-4 text-sm font-semibold text-emerald-900 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-5">
+                  {t.viewDoctors}
+                </a>
+              </div>
             </div>
+            <div className="relative order-2 min-h-[230px] min-w-0 overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-teal-50 sm:min-h-[280px] lg:min-h-[340px]">
+              <Image
+                src="/images/clinic-hero.webp"
+                alt={t.heroImageDescription}
+                fill
+                priority
+                sizes="(min-width: 1024px) 570px, 100vw"
+                className="absolute inset-0 size-full object-cover lg:[clip-path:ellipse(100%_125%_at_right_center)]"
+              />
+            </div>
+          </section>
+          <div aria-hidden="true" className="h-px bg-emerald-100" />
+
+          <section aria-label={language === "hi" ? "क्लिनिक की जानकारी" : "Clinic information"} className="grid grid-cols-2 [&>div:nth-child(odd)]:border-r [&>div:nth-child(odd)]:border-[var(--border)] lg:grid-cols-4 lg:divide-x lg:divide-[var(--border)] lg:[&>div:nth-child(odd)]:border-r-0">
+            <div className="flex min-w-0 items-center gap-2.5 px-3 py-3 text-slate-700 sm:gap-3 sm:px-5 sm:py-4">
+              <UsersRound className="shrink-0 text-emerald-700" size={20} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-[0.8125rem] font-bold leading-5 text-emerald-950 sm:text-sm">{t.featureDoctorsTitle}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-slate-600">{t.featureDoctorsDescription}</span>
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2.5 px-3 py-3 text-slate-700 sm:gap-3 sm:px-5 sm:py-4">
+              <CalendarDays className="shrink-0 text-emerald-700" size={20} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-[0.8125rem] font-bold leading-5 text-emerald-950 sm:text-sm">{t.featureSchedulesTitle}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-slate-600">{t.featureSchedulesDescription}</span>
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2.5 px-3 py-3 text-slate-700 sm:gap-3 sm:px-5 sm:py-4">
+              <CheckCircle2 className="shrink-0 text-emerald-700" size={20} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-[0.8125rem] font-bold leading-5 text-emerald-950 sm:text-sm">{t.featureAppointmentsTitle}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-slate-600">{t.featureAppointmentsDescription}</span>
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2.5 px-3 py-3 text-slate-700 sm:gap-3 sm:px-5 sm:py-4">
+              <Phone className="shrink-0 text-emerald-700" size={20} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-[0.8125rem] font-bold leading-5 text-emerald-950 sm:text-sm">{t.featureContactTitle}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-slate-600">{t.featureContactDescription}</span>
+              </span>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div className="home-container">
+        <section
+          id="doctors"
+          aria-labelledby="find-doctor-heading"
+          className="scroll-mt-24 py-6 sm:py-7"
+        >
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2
+                id="find-doctor-heading"
+                className="text-xl font-bold text-emerald-950 sm:text-2xl"
+              >
+                {t.findDoctorTitle}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {t.findDoctorSubtitle}
+              </p>
+            </div>
+            <a
+              href="#doctor-directory"
+              className="inline-flex min-h-10 items-center gap-1 rounded-lg px-3 text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+            >
+              {t.viewAllDoctors}
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </a>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <article id="doctor-directory" className="rounded-xl border border-emerald-100 bg-white p-4 sm:p-5">
+              <div className="flex items-start gap-4">
+                <div className="relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50 text-emerald-700">
+                  {clinic.doctorPhotoUrl ? (
+                    <Image
+                      src={clinic.doctorPhotoUrl}
+                      alt={`${t.clinicOwner}: ${clinic.doctorName}`}
+                      fill
+                      sizes="80px"
+                      unoptimized
+                      className="object-cover"
+                    />
+                  ) : (
+                    <UserRound size={34} aria-hidden="true" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-900">{t.clinicOwner}</span>
+                  <h3 className="mt-2 break-words text-lg font-bold text-emerald-950">{clinic.doctorName || "Subhal Thakur"}</h3>
+                  {clinic.qualification && (
+                    <p className="mt-2 text-sm leading-5 text-slate-700">
+                      <span className="font-semibold">{t.verifiedQualifications}: </span>{clinic.qualification}
+                    </p>
+                  )}
+                  {clinic.speciality && (
+                    <p className="mt-1 text-sm leading-5 text-slate-700">
+                      <span className="font-semibold">{t.verifiedDesignation}: </span>{clinic.speciality}
+                    </p>
+                  )}
+                  {clinic.registrationInfo && (
+                    <p className="mt-1 text-sm leading-5 text-slate-700">
+                      <span className="font-semibold">{t.registrationInfo}: </span>{clinic.registrationInfo}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </article>
+            <article
+              id="about"
+              className="scroll-mt-24 rounded-xl border border-emerald-100 bg-white p-4 sm:p-5"
+            >
+              <h3 className="font-semibold text-emerald-950">{t.details}</h3>
+              <p className="mt-1.5 text-sm leading-6 text-slate-700">
+                {clinic.isSampleProfile || !clinic.introduction ? t.profileInfoUnavailable : clinic.introduction}
+              </p>
+            </article>
+            {publishedDoctors.length > 0 && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
+                {publishedDoctors.map((doctor) => (
+                  <PublicDoctorCard key={doctor.id} doctor={doctor} language={language} />
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
-        <section id="availability" className="scroll-mt-6 py-6">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <section id="availability" className="scroll-mt-24 py-6 sm:py-7">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-bold text-slate-950">{t.today}</h2>
+              <h2 className="text-xl font-bold text-emerald-950 sm:text-2xl">{t.today}</h2>
               <p className="mt-1 text-sm text-slate-600">
                 {t.todayDate}: {dateLabel(today, language)}
               </p>
             </div>
           </div>
           {todaySessions.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[var(--border)] bg-white p-6 text-slate-700">
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-white px-4 py-3 text-sm text-slate-700">
               {t.noSchedule}
             </div>
           ) : (
@@ -519,78 +898,364 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
               ))}
             </div>
           )}
-          <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+          <p className={`mt-4 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
+            clinic.isSampleAvailability
+              ? "bg-amber-50 text-amber-950"
+              : "bg-slate-50 text-slate-700"
+          }`}>
             <ShieldCheck size={17} aria-hidden="true" />
             {clinic.isSampleAvailability ? t.samplePreview : t.notGuaranteed}
           </p>
         </section>
+      </div>
 
-        <section id="about" className="grid scroll-mt-6 gap-5 py-9 md:grid-cols-2">
-          <article className="rounded-2xl border border-[var(--border)] bg-white p-6 sm:p-7">
-            <h2 className="text-xl font-bold text-slate-950">{t.details}</h2>
-            <p className="mt-3 leading-7 text-slate-700">
-              {publicText(clinic.introduction, SAMPLE_PUBLIC_CONTENT.introduction, language, t.sampleIntroduction)}
+      <section
+        id="booking-process"
+        aria-labelledby="booking-process-heading"
+        className="scroll-mt-24 py-3 sm:py-4"
+      >
+        <div className="home-container">
+          <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white">
+            <div className="px-4 pt-4 sm:px-6">
+              <h2
+                id="booking-process-heading"
+                className="text-xl font-bold text-emerald-950 sm:text-2xl"
+              >
+                {t.bookingGuideTitle}
+              </h2>
+            </div>
+            <ol className="grid lg:grid-cols-3 lg:divide-x lg:divide-emerald-100">
+              <li className="flex gap-3 border-b border-emerald-100 px-4 py-4 last:border-b-0 sm:px-6 lg:border-b-0">
+                <span className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                  <Search size={20} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-700 text-[0.6875rem] font-bold text-white">
+                    1
+                  </span>
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold leading-6 text-emerald-950">
+                    {t.bookingStepOneTitle}
+                  </span>
+                  <span className="mt-1 block text-sm leading-5 text-slate-600">
+                    {t.bookingStepOneDescription}
+                  </span>
+                </span>
+              </li>
+              <li className="flex gap-3 border-b border-emerald-100 px-4 py-4 last:border-b-0 sm:px-6 lg:border-b-0">
+                <span className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                  <CalendarDays size={20} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-700 text-[0.6875rem] font-bold text-white">
+                    2
+                  </span>
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold leading-6 text-emerald-950">
+                    {t.bookingStepTwoTitle}
+                  </span>
+                  <span className="mt-1 block text-sm leading-5 text-slate-600">
+                    {t.bookingStepTwoDescription}
+                  </span>
+                </span>
+              </li>
+              <li className="flex gap-3 px-4 py-4 sm:px-6">
+                <span className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                  <CheckCircle2 size={20} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-700 text-[0.6875rem] font-bold text-white">
+                    3
+                  </span>
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold leading-6 text-emerald-950">
+                    {t.bookingStepThreeTitle}
+                  </span>
+                  <span className="mt-1 block text-sm leading-5 text-slate-600">
+                    {t.bookingStepThreeDescription}
+                  </span>
+                </span>
+              </li>
+            </ol>
+            <div className="border-t border-emerald-100 px-4 py-3 sm:px-6">
+              <button
+                type="button"
+                onClick={openBooking}
+                className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-5 text-sm font-semibold text-white hover:bg-[var(--primary-dark)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              >
+                {t.bookingGuideAction}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="contact"
+        aria-labelledby="clinic-information-heading"
+        className="scroll-mt-24 py-6 sm:py-7"
+      >
+        <div className="home-container">
+          <div className="mb-4">
+            <h2
+              id="clinic-information-heading"
+              className="text-xl font-bold text-emerald-950 sm:text-2xl"
+            >
+              {t.locations}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {t.clinicInfoDescription}
             </p>
-          </article>
-          <article id="services" className="scroll-mt-6 rounded-2xl border border-[var(--border)] bg-white p-6 sm:p-7">
-            <h2 className="text-xl font-bold text-slate-950">{t.services}</h2>
-            <ul className="mt-4 flex flex-wrap gap-2">
-              {clinic.services.map((service) => (
-                <li key={service} className="rounded-full bg-teal-50 px-3 py-1.5 text-sm text-teal-900">
-                  {language === "hi" ? hindiServices[service] ?? service : service}
-                </li>
-              ))}
-            </ul>
-          </article>
-        </section>
+          </div>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-[var(--border)] bg-white p-4 sm:p-5">
+              <div className="flex gap-3 border-b border-slate-100 pb-4">
+                <Clock3
+                  className="mt-0.5 shrink-0 text-emerald-700"
+                  size={20}
+                  aria-hidden="true"
+                />
+                <div>
+                  <h3 className="font-semibold text-emerald-950">
+                    {t.sessionInformation}
+                  </h3>
+                  <p className="mt-0.5 text-sm leading-5 text-slate-600">
+                    {t.sessionInformationDescription}
+                  </p>
+                  <a
+                    href="#availability"
+                    className="mt-1 inline-flex min-h-8 items-center gap-1 text-sm font-semibold text-emerald-800 underline underline-offset-4 hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                  >
+                    {t.today}
+                    <ArrowUpRight size={15} aria-hidden="true" />
+                  </a>
+                </div>
+              </div>
 
-        <section id="contact" className="scroll-mt-6 pb-9">
-          <article className="rounded-2xl border border-[var(--border)] bg-white p-6 sm:p-7">
-            <h2 className="text-xl font-bold text-slate-950">{t.locations}</h2>
-            {clinic.locations.length === 0 ? (
-              <p className="mt-3 flex items-center gap-2 text-slate-700"><MapPin size={18} aria-hidden="true" />Ashta, Madhya Pradesh</p>
-            ) : (
-              <ul className="mt-4 space-y-4">
-                {clinic.locations.map((location) => (
-                  <li key={location.id} className="flex gap-3">
-                    <MapPin className="mt-1 shrink-0 text-[var(--primary)]" size={19} aria-hidden="true" />
-                    <div>
-                      <p className="font-semibold text-slate-900">{locationText(location.name, language)}</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">{locationText(location.address, language)}</p>
-                      {location.directionsUrl && (
-                        <a
-                          href={location.directionsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-[var(--primary)] underline underline-offset-2"
-                        >
-                          {t.directions} <ArrowUpRight size={15} aria-hidden="true" />
-                        </a>
-                      )}
-                    </div>
+              <div className="flex gap-3 border-b border-slate-100 py-4">
+                <MapPin
+                  className="mt-0.5 shrink-0 text-emerald-700"
+                  size={20}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-emerald-950">
+                    {t.clinicAddress}
+                  </h3>
+                  {verifiedLocations.length > 0 ? (
+                    <ul className="mt-1.5 space-y-2">
+                      {verifiedLocations.map((location) => (
+                        <li key={location.id} className="text-sm">
+                          <p className="font-medium text-slate-800">
+                            {locationText(location.name, language)}
+                          </p>
+                          <p className="mt-0.5 leading-5 text-slate-600">
+                            {locationText(location.address, language)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-sm leading-5 text-slate-600">
+                      {t.locationUnavailable}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Phone
+                  className="mt-0.5 shrink-0 text-emerald-700"
+                  size={19}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-emerald-950">{t.contact}</h3>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {clinicInfoPhoneHref && clinicInfoPhoneDisplay && (
+                      <a
+                        href={clinicInfoPhoneHref}
+                        className="inline-flex min-h-8 items-center text-sm font-medium text-emerald-900 hover:text-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                      >
+                        {clinicInfoPhoneDisplay}
+                      </a>
+                    )}
+                    {clinicInfoWhatsAppHref && (
+                      <a
+                        href={clinicInfoWhatsAppHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-8 items-center gap-1.5 text-sm font-semibold text-emerald-800 hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                      >
+                        <MessageCircle size={16} aria-hidden="true" />
+                        {t.whatsapp}
+                      </a>
+                    )}
+                    {!clinicInfoPhoneHref && !clinicInfoWhatsAppHref && (
+                      <p className="text-sm leading-5 text-slate-600">
+                        {t.footerContactUnavailable}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-white">
+              <h3 className="px-4 py-3 font-semibold text-emerald-950 sm:px-5">
+                {t.mapPanelTitle}
+              </h3>
+              {verifiedLocations.length > 0 ? (
+                <ul className="space-y-3 p-4 sm:px-5">
+                  {verifiedLocations.map((location) => {
+                    const directionsUrl = safeDirectionsUrl(location.directionsUrl);
+                    return (
+                      <li
+                        key={location.id}
+                        className="flex flex-col gap-3 rounded-lg bg-emerald-50/60 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex min-w-0 items-start gap-3">
+                          <MapPin
+                            className="mt-0.5 shrink-0 text-emerald-700"
+                            size={19}
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-emerald-950">
+                              {locationText(location.name, language)}
+                            </p>
+                            <p className="mt-1 text-sm leading-5 text-slate-600">
+                              {locationText(location.address, language)}
+                            </p>
+                          </div>
+                        </div>
+                        {directionsUrl ? (
+                          <a
+                            href={directionsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`${t.directions}: ${locationText(location.name, language)}`}
+                            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:self-auto"
+                          >
+                            {t.directions}
+                            <ArrowUpRight size={16} aria-hidden="true" />
+                          </a>
+                        ) : (
+                          <p className="text-sm leading-5 text-slate-600 sm:text-right">
+                            {t.directionsUnavailable}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+                  <MapPin
+                    className="text-slate-400"
+                    size={28}
+                    aria-hidden="true"
+                  />
+                  <p className="max-w-sm text-sm leading-6 text-slate-600">
+                    {t.locationUnavailable}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer id="privacy" className="bg-emerald-950 text-emerald-50">
+        <div className="home-container py-6 sm:py-7">
+          <div className="grid grid-cols-2 items-start gap-x-5 gap-y-6 lg:grid-cols-3 lg:gap-8">
+            <section aria-labelledby="footer-brand-heading" className="col-span-2 lg:col-span-1 lg:pr-7">
+              <a
+                href="#home"
+                className="inline-flex min-h-10 items-center gap-2 rounded-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+              >
+                <HeartPulse size={25} aria-hidden="true" />
+                <span id="footer-brand-heading">
+                  {clinic.clinicName || t.clinicName}
+                </span>
+              </a>
+              <p className="mt-3 max-w-xs text-sm leading-6 text-emerald-100/80">
+                {clinic.isSampleProfile || !clinic.introduction ? t.footerIntro : clinic.introduction}
+              </p>
+            </section>
+
+            <section
+              aria-labelledby="footer-links-heading"
+              className="min-w-0"
+            >
+              <h2 id="footer-links-heading" className="flex min-h-10 items-center font-semibold text-white">
+                {t.quickLinks}
+              </h2>
+              <ul className="mt-2 space-y-1 text-sm text-emerald-100/80">
+                {navigationItems.map((item) => (
+                  <li key={item.href}>
+                    <a
+                      href={item.href}
+                      className="inline-flex min-h-7 items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+                    >
+                      {item.label}
+                    </a>
                   </li>
                 ))}
               </ul>
-            )}
-            {contactPhone && <p className="mt-4 text-sm font-medium text-slate-700">{contactPhone}</p>}
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              {phoneHref ? <a className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal-50 px-4 font-semibold text-teal-950" href={phoneHref}><Phone size={17} aria-hidden="true" />{t.call}</a> : <button type="button" disabled aria-disabled="true" className="inline-flex min-h-11 cursor-not-allowed items-center gap-2 rounded-lg bg-slate-100 px-4 font-semibold text-slate-400"><Phone size={17} aria-hidden="true" />{t.call}</button>}
-              {whatsappHref ? <a className="inline-flex min-h-11 items-center rounded-lg bg-teal-50 px-4 font-semibold text-teal-950" href={whatsappHref} target="_blank" rel="noreferrer">{t.whatsapp}</a> : <button type="button" disabled aria-disabled="true" className="inline-flex min-h-11 cursor-not-allowed items-center rounded-lg bg-slate-100 px-4 font-semibold text-slate-400">{t.whatsapp}</button>}
-              {!phoneHref && !whatsappHref && <span className="text-sm text-slate-500">{t.contactComingSoon}</span>}
-            </div>
-          </article>
-        </section>
-      </div>
+            </section>
 
-      <footer id="privacy" className="border-t border-[var(--border)] bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <span>© {new Date().getFullYear()} {clinic.clinicName || t.clinicName}</span>
-          <p className="max-w-2xl">{t.privacy}: {language === "hi" ? "बुकिंग के लिए दी गई जानकारी केवल अनुरोध संभालने के लिए उपयोग होगी।" : "Information provided for a visit request is used only to handle that request."}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {phoneHref && contactPhone && <a className="font-medium text-[var(--primary)] underline underline-offset-2" href={phoneHref}>{contactPhone}</a>}
-            {whatsappHref && <a className="font-medium text-[var(--primary)] underline underline-offset-2" href={whatsappHref} target="_blank" rel="noreferrer">{t.whatsapp}</a>}
+            <section
+              aria-labelledby="footer-contact-heading"
+              className="col-span-2 min-w-0 border-t border-emerald-50/15 pt-4 lg:col-span-1 lg:border-t-0 lg:pt-0"
+            >
+              <h2 id="footer-contact-heading" className="flex min-h-10 items-center font-semibold text-white">
+                {t.getInTouch}
+              </h2>
+              {verifiedLocations[0] && (
+                <p className="mt-3 flex items-start gap-2 text-sm leading-5 text-emerald-100/80">
+                  <MapPin className="mt-0.5 shrink-0" size={16} aria-hidden="true" />
+                  <span>{locationText(verifiedLocations[0].address, language)}</span>
+                </p>
+              )}
+              {clinicInfoPhoneHref && clinicInfoPhoneDisplay && (
+                <a
+                  href={clinicInfoPhoneHref}
+                  className="mt-2 inline-flex min-h-9 items-center gap-2 text-sm text-emerald-100/80 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+                >
+                  <Phone size={15} aria-hidden="true" />
+                  {clinicInfoPhoneDisplay}
+                </a>
+              )}
+              {!verifiedLocations[0] && !clinicInfoPhoneHref && !clinicInfoWhatsAppHref && (
+                <p className="mt-3 text-sm leading-5 text-emerald-100/70">
+                  {t.footerContactUnavailable}
+                </p>
+              )}
+              {clinicInfoWhatsAppHref && (
+                <a
+                  href={clinicInfoWhatsAppHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex min-h-9 items-center gap-2 text-sm text-emerald-100/80 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+                >
+                  <MessageCircle size={15} aria-hidden="true" />
+                  {t.whatsapp}
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={openBooking}
+                className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+              >
+                {t.bookingGuideAction}
+              </button>
+            </section>
           </div>
-          <a className="font-medium text-[var(--primary)] underline underline-offset-2" href="/doctor/login">{t.login}</a>
+
+          <div className="mt-6 flex flex-col gap-2 border-t border-emerald-50/15 pt-4 text-xs leading-5 text-emerald-100/70 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              © {new Date().getFullYear()} {clinic.clinicName || t.clinicName}
+            </span>
+            <p className="max-w-2xl sm:text-right">{t.footerPrivacyNote}</p>
+          </div>
         </div>
       </footer>
 
@@ -747,30 +1412,40 @@ function SessionCard({
   const statusStyle =
     session.status === "open"
       ? "bg-emerald-50 text-emerald-900"
-      : "bg-slate-100 text-slate-700";
+      : session.status === "full"
+        ? "bg-amber-50 text-amber-900"
+        : "bg-slate-100 text-slate-700";
 
   return (
-    <article className="rounded-2xl border border-[var(--border)] bg-white p-5 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-bold text-slate-950">
+    <article className="rounded-xl border border-[var(--border)] bg-white p-3.5 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="order-2 min-w-0 sm:order-1">
+          <h3 className="text-base font-bold text-emerald-950 sm:text-lg">
             {session.isSample
               ? session.locationName === "Village consultation" ? t.sampleVillage : t.sampleClinic
               : session.locationName}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">{locationText(session.address, language)}</p>
+          <p className="mt-1 flex items-start gap-1.5 text-sm text-slate-600">
+            <MapPin className="mt-0.5 shrink-0 text-[var(--primary)]" size={15} aria-hidden="true" />
+            {locationText(session.address, language)}
+          </p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${session.isSample ? "bg-amber-50 text-amber-900" : statusStyle}`}>
+        <span className={`order-1 w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold leading-4 sm:order-2 ${session.isSample ? "bg-amber-50 text-amber-900" : statusStyle}`}>
           {session.isSample ? t.sampleTiming : statusLabel}
         </span>
       </div>
-      <p className="mt-4 text-sm text-slate-600">{dateLabel(session.date, language)}</p>
-      <p className="mt-2 flex items-center gap-2 font-semibold text-slate-800">
-        <Clock3 size={18} className="text-[var(--primary)]" aria-hidden="true" />
-        {timeLabel(session.startsAt)} – {timeLabel(session.endsAt)}
-      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-100 pt-3 text-sm text-slate-600">
+        <p className="flex items-center gap-1.5">
+          <CalendarDays size={15} className="shrink-0 text-[var(--primary)]" aria-hidden="true" />
+          {dateLabel(session.date, language)}
+        </p>
+        <p className="flex items-center gap-1.5 font-semibold text-slate-800">
+          <Clock3 size={16} className="shrink-0 text-[var(--primary)]" aria-hidden="true" />
+          {timeLabel(session.startsAt)} – {timeLabel(session.endsAt)}
+        </p>
+      </div>
       {session.note && (
-        <p className="mt-3 text-sm leading-6 text-slate-600">
+        <p className="mt-2 text-sm leading-5 text-slate-600">
           <span className="font-semibold">{t.optionalNote}: </span>{session.note}
         </p>
       )}

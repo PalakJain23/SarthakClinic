@@ -57,11 +57,11 @@ export default async function ReportsPage({
         <h2 className="text-lg font-bold text-slate-950">All-time account position</h2>
         <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <ReportValue label="Total outstanding" value={formatRupees(outstandingResult.data?.outstanding_paise ?? 0)} />
-          <ReportValue label="Patients with positive balance" value={String(outstandingResult.data?.patients_owing ?? 0)} />
+          <ReportValue label="Accounts with positive balance" value={String(outstandingResult.data?.patients_owing ?? 0)} />
           <ReportValue label="Net credit charges" value={formatRupees(totals?.credit_charges_paise ?? 0)} />
           <ReportValue label="Opening dues (separate)" value={formatRupees(totals?.opening_dues_paise ?? 0)} />
         </dl>
-        <p className="mt-4 text-xs leading-5 text-slate-500">All figures are derived from saved records. Patient credit and opening dues are not represented as new charges.</p>
+        <p className="mt-4 text-xs leading-5 text-slate-500">All figures are derived from saved records. Opening dues are separate from new charges; signed corrections and reversals are reflected in outstanding balances and account histories.</p>
       </section>
     </div>
   );

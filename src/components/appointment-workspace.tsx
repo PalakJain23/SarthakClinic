@@ -20,7 +20,7 @@ import {
   updateAppointmentAction,
   type FormActionState,
 } from "@/app/doctor/actions";
-import { AppointmentStatusForm, LinkPatientForm, WalkInForm } from "@/components/doctor-forms";
+import { AppointmentStatusForm, LinkPatientForm } from "@/components/doctor-forms";
 import { formatDate } from "@/lib/format";
 
 export type AppointmentRecord = {
@@ -119,7 +119,6 @@ export function AppointmentWorkspace({
   const todays = appointments.filter((item) => item.session.date === today && item.status !== "cancelled");
   const upcoming = appointments.filter((item) => item.session.date > today && item.status !== "cancelled");
   const completed = todays.filter((item) => item.status === "completed");
-  const walkIns = todays.filter((item) => item.bookingReference.startsWith("WALKIN-"));
   const shown = tab === "today"
     ? appointments.filter((item) => item.session.date === today)
     : tab === "upcoming"
@@ -144,10 +143,9 @@ export function AppointmentWorkspace({
         </button>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Appointment summaries">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Appointment summaries">
         <Metric icon={<CalendarDays size={20} />} label="Today’s appointments" value={todays.length} />
         <Metric icon={<Clock3 size={20} />} label="Upcoming appointments" value={upcoming.length} />
-        <Metric icon={<UserRoundPlus size={20} />} label="Walk-ins today" value={walkIns.length} />
         <Metric icon={<CheckCircle2 size={20} />} label="Completed today" value={completed.length} />
       </section>
 
@@ -160,9 +158,6 @@ export function AppointmentWorkspace({
               </h2>
               <p className="mt-1 text-sm text-slate-500">{shown.length} records</p>
             </div>
-            <button type="button" onClick={() => setDialog("add")} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-emerald-300 px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50">
-              <Plus size={16} aria-hidden="true" /> Add Appointment
-            </button>
           </div>
           <div role="tablist" aria-label="Appointment date range" className="flex gap-2 overflow-x-auto border-b border-slate-100 p-3">
             {([
@@ -247,10 +242,6 @@ export function AppointmentWorkspace({
               <Link href="/doctor/reports" className="quick-action"><FileChartColumn size={20} />Reports</Link>
             </div>
           </section>
-          <details className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
-            <summary className="cursor-pointer font-bold text-slate-950">Register a walk-in</summary>
-            <div className="mt-4"><WalkInForm sessions={sessions.filter((session) => session.date === today).map((session) => ({ id: session.id, label: `${session.locationName} · ${sessionTime(session)}` }))} patients={patients.map((patient) => ({ id: patient.id, name: patient.fullName }))} /></div>
-          </details>
         </aside>
       </div>
 

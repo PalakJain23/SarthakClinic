@@ -1,7 +1,17 @@
 import "server-only";
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { getSamplePublicClinic, SAMPLE_PUBLIC_CONTENT } from "@/lib/sample-public-content";
+
+const initialOwnerPhotoPath = "/images/doctors/subhal-thakur.webp";
+
+export function getInitialOwnerPhotoUrl() {
+  return existsSync(join(process.cwd(), "public", "images", "doctors", "subhal-thakur.webp"))
+    ? initialOwnerPhotoPath
+    : null;
+}
 
 export type SessionStatus = "open" | "closed" | "full";
 
@@ -30,16 +40,19 @@ export type PublicClinicData = {
   isConfigured: boolean;
   isSampleProfile: boolean;
   isSampleAvailability: boolean;
+  isSampleLocations: boolean;
+  isSamplePhone: boolean;
+  isSampleWhatsApp: boolean;
   clinicName: string;
   doctorName: string;
   qualification: string;
   speciality: string;
+  registrationInfo: string;
   introduction: string;
   doctorPhotoUrl: string | null;
   phone: string | null;
   whatsapp: string | null;
   locations: PublicLocation[];
-  services: string[];
   sessions: PublicSession[];
 };
 
@@ -66,31 +79,36 @@ function dateInIndia(offsetDays = 0) {
 export async function getPublicClinicData(): Promise<PublicClinicData> {
   const demo = isDemoMode();
   if (demo) {
-    return getSamplePublicClinic({
-      isDemo: true,
-      isConfigured: false,
-      includeSampleSessions: true,
-    });
+    return {
+      ...getSamplePublicClinic({
+        isDemo: true,
+        isConfigured: false,
+        includeSampleSessions: true,
+      }),
+      doctorPhotoUrl: getInitialOwnerPhotoUrl(),
+    };
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
-    return getSamplePublicClinic({
-      isDemo: false,
-      isConfigured: false,
-      includeSampleSessions: process.env.NODE_ENV !== "production",
-    });
+    return {
+      ...getSamplePublicClinic({
+        isDemo: false,
+        isConfigured: false,
+        includeSampleSessions: process.env.NODE_ENV !== "production",
+      }),
+      doctorPhotoUrl: getInitialOwnerPhotoUrl(),
+    };
   }
 
   const supabase = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const [profileResult, locationResult, serviceResult, sessionResult] =
+  const [profileResult, locationResult, sessionResult] =
     await Promise.all([
       supabase.from("public_clinic_profile").select("*").maybeSingle(),
       supabase.from("public_clinic_locations").select("*").order("sort_order"),
-      supabase.from("public_clinic_services").select("name").order("sort_order"),
       supabase
         .from("public_availability")
         .select("*")
@@ -103,7 +121,6 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
   for (const result of [
     profileResult,
     locationResult,
-    serviceResult,
     sessionResult,
   ]) {
     if (result.error) {
@@ -145,10 +162,13 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
     ];
   });
   const profile = profileResult.data;
+  const isSamplePhone = !profile?.public_phone?.trim();
+  const isSampleWhatsApp = !profile?.public_whatsapp?.trim();
   const doctorName = profile?.doctor_name?.trim() || SAMPLE_PUBLIC_CONTENT.doctorName;
-  const qualification = profile?.qualification?.trim() || SAMPLE_PUBLIC_CONTENT.qualification;
-  const speciality = profile?.speciality?.trim() || SAMPLE_PUBLIC_CONTENT.speciality;
-  const introduction = profile?.public_introduction?.trim() || SAMPLE_PUBLIC_CONTENT.introduction;
+  const qualification = profile?.qualification?.trim() || "";
+  const speciality = profile?.speciality?.trim() || "";
+  const registrationInfo = profile?.registration_info?.trim() || "";
+  const introduction = profile?.public_introduction?.trim() || "";
   const useSampleSessions =
     (sessionResult.data ?? []).length === 0 &&
     process.env.NODE_ENV !== "production";
@@ -163,22 +183,21 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
   return {
     isDemo: false,
     isConfigured: true,
-    isSampleProfile: !profile || !profile.doctor_name?.trim() ||
-      !profile.qualification?.trim() || !profile.speciality?.trim() ||
-      !profile.public_introduction?.trim(),
+    isSampleProfile: !profile || !profile.doctor_name?.trim(),
     isSampleAvailability: useSampleSessions,
+    isSampleLocations: configuredLocations.length === 0,
+    isSamplePhone,
+    isSampleWhatsApp,
     clinicName: profile?.clinic_name?.trim() || SAMPLE_PUBLIC_CONTENT.clinicName,
     doctorName,
     qualification,
     speciality,
+    registrationInfo,
     introduction,
-    doctorPhotoUrl: profile?.doctor_photo_url ?? null,
-    phone: profile?.public_phone ?? SAMPLE_PUBLIC_CONTENT.publicPhone,
-    whatsapp: profile?.public_whatsapp ?? SAMPLE_PUBLIC_CONTENT.publicWhatsApp,
+    doctorPhotoUrl: profile?.doctor_photo_url?.trim() || getInitialOwnerPhotoUrl(),
+    phone: profile?.public_phone?.trim() || SAMPLE_PUBLIC_CONTENT.publicPhone,
+    whatsapp: profile?.public_whatsapp?.trim() || SAMPLE_PUBLIC_CONTENT.publicWhatsApp,
     locations,
-    services: (serviceResult.data ?? []).length
-      ? (serviceResult.data ?? []).map((service) => service.name)
-      : [...SAMPLE_PUBLIC_CONTENT.services],
     sessions,
   };
 }

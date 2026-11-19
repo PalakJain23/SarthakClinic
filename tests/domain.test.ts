@@ -5,8 +5,10 @@ import {
   normalizeIndianMobile,
 } from "../src/lib/booking-schema.ts";
 import {
+  calculateBalanceAfterReversal,
   calculateAccountTotals,
   calculateLedgerBalance,
+  calculateLedgerRunningBalances,
   parseRupeesToPaise,
 } from "../src/lib/ledger.ts";
 import { formatRupees } from "../src/lib/format.ts";
@@ -48,12 +50,13 @@ test("sample public schedule is preview-only and uses the configured local times
   });
   assert.equal(preview.isSampleProfile, true);
   assert.equal(preview.isSampleAvailability, true);
-  assert.equal(preview.doctorName, "Dr. Subhal Singh Thakur");
-  assert.equal(preview.speciality, "General Physician");
+  assert.equal(preview.doctorName, "Subhal Thakur");
+  assert.equal(preview.qualification, "");
+  assert.equal(preview.speciality, "");
+  assert.equal(preview.registrationInfo, "");
   assert.equal(preview.phone, "+919229681235");
   assert.equal(preview.whatsapp, "+919229681235");
   assert.equal(SAMPLE_PUBLIC_CONTENT.publicPhoneDisplay, "+91 92296 81235");
-  assert.deepEqual(preview.services, [...SAMPLE_PUBLIC_CONTENT.services]);
   assert.equal(preview.sessions.length, 14);
   assert.ok(preview.sessions.every((session) => session.isSample && session.status === "closed"));
   assert.deepEqual(
@@ -95,6 +98,32 @@ test("ledger example and corrections calculate without floating-point arithmetic
     ]),
     151000n,
   );
+});
+
+test("reversal cannot create a negative account balance", () => {
+  assert.equal(calculateBalanceAfterReversal(50000n, 50000n), 0n);
+  assert.equal(calculateBalanceAfterReversal(49999n, 50000n), null);
+  assert.equal(calculateBalanceAfterReversal(0n, -50000n), 50000n);
+});
+
+test("transaction history calculates chronological balances for partial and full payments", () => {
+  const history = calculateLedgerRunningBalances([
+    { amountPaise: 200000n },
+    { amountPaise: -50000n },
+    { amountPaise: 2500n },
+    { amountPaise: -2500n },
+    { amountPaise: -100000n },
+    { amountPaise: -50000n },
+  ]);
+  assert.deepEqual(history.map((entry) => entry.runningBalance), [
+    200000n,
+    150000n,
+    152500n,
+    150000n,
+    50000n,
+    0n,
+  ]);
+  assert.equal(history.at(-1)?.runningBalance, 0n);
 });
 
 test("opening dues, charges, and payments produce one consistent paise balance", () => {

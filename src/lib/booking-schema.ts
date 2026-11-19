@@ -28,15 +28,15 @@ export const bookingSchema = z.object({
 
 export type BookingInput = z.infer<typeof bookingSchema>;
 
-export function normalizeIndianMobile(value: string) {
+export function normalizeIndianMobileIfValid(value: string | null | undefined) {
+  if (!value) return null;
   const compact = value.trim().replace(/[\s()-]/g, "");
-  if (!/^(?:\+?91)?[6-9]\d{9}$/.test(compact)) {
-    throw new Error("Please enter a valid Indian mobile number.");
-  }
-  const digits = compact.replace(/^\+?91/, "");
-  const local = digits.length === 10 ? digits : compact;
-  if (!/^[6-9]\d{9}$/.test(local)) {
-    throw new Error("Please enter a valid Indian mobile number.");
-  }
-  return `+91${local}`;
+  const match = /^(?:\+?91)?([6-9]\d{9})$/.exec(compact);
+  return match ? `+91${match[1]}` : null;
+}
+
+export function normalizeIndianMobile(value: string) {
+  const normalized = normalizeIndianMobileIfValid(value);
+  if (!normalized) throw new Error("Please enter a valid Indian mobile number.");
+  return normalized;
 }

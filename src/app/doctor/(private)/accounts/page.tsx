@@ -1,16 +1,32 @@
-import { LedgerWorkspace, type LedgerPatientRow, type LedgerTotals } from "@/components/ledger-workspace";
-import type { LedgerPatientSummary } from "@/app/doctor/actions";
+import {
+  LedgerWorkspace,
+  type LedgerPersonOption,
+  type LedgerPersonRow,
+  type LedgerTotals,
+} from "@/components/ledger-workspace";
 import { requireDoctor } from "@/lib/doctor-auth";
 
 export const dynamic = "force-dynamic";
 const pageSize = 10;
-type PatientPageResult = {
-  patient_id: string;
+
+type PersonPageResult = {
+  person_id: string;
   full_name: string;
-  mobile: string;
+  mobile: string | null;
+  total_udhaar_paise: number | string;
+  total_paid_paise: number | string;
   balance_paise: number | string;
-  last_visit: string | null;
   total_count: number | string;
+};
+
+type PersonOptionResult = {
+  person_id: string;
+  patient_id: string | null;
+  full_name: string;
+  mobile: string | null;
+  total_udhaar_paise: number | string;
+  total_paid_paise: number | string;
+  balance_paise: number | string;
 };
 
 export default async function AccountsPage({
@@ -22,6 +38,7 @@ export default async function AccountsPage({
     sort?: string;
     direction?: string;
     page?: string;
+    person?: string;
     patient?: string;
     transaction?: string;
   }>;
@@ -31,7 +48,7 @@ export default async function AccountsPage({
   const balanceFilter = ["all", "due", "credit", "settled"].includes(params.balance ?? "")
     ? params.balance!
     : "all";
-  const sort = ["name", "balance", "last_visit"].includes(params.sort ?? "")
+  const sort = ["name", "udhaar", "paid", "balance"].includes(params.sort ?? "")
     ? params.sort!
     : "name";
   const direction = params.direction === "desc" ? "desc" : "asc";
@@ -39,10 +56,11 @@ export default async function AccountsPage({
   const autoTransaction = ["charge", "payment"].includes(params.transaction ?? "")
     ? params.transaction as "charge" | "payment"
     : null;
+  const requestedPerson = /^[0-9a-f-]{36}$/i.test(params.person ?? "") ? params.person! : "";
   const requestedPatient = /^[0-9a-f-]{36}$/i.test(params.patient ?? "") ? params.patient! : "";
   const { supabase } = await requireDoctor();
-  const [patientPageResult, totalsResult, accountResult, patientOptionsResult] = await Promise.all([
-    supabase.rpc("doctor_ledger_patient_page", {
+  const [personPageResult, totalsResult, accountResult, personOptionsResult, activePeopleResult] = await Promise.all([
+    supabase.rpc("doctor_ledger_person_page", {
       p_search: search,
       p_balance_filter: balanceFilter,
       p_sort: sort,
@@ -52,107 +70,56 @@ export default async function AccountsPage({
     }),
     supabase.rpc("accounting_ledger_totals"),
     supabase.from("accounting_summary").select("outstanding_paise, patients_owing").maybeSingle(),
-    supabase.from("patients").select("id, full_name, mobile").order("full_name").limit(1000),
+    supabase.rpc("ledger_person_options"),
+    supabase.from("ledger_people").select("id").is("archived_at", null),
   ]);
-  const initialFailure = [patientPageResult, totalsResult, accountResult, patientOptionsResult].find((result) => result.error);
+  const initialFailure = [personPageResult, totalsResult, accountResult, personOptionsResult, activePeopleResult].find((result) => result.error);
   if (initialFailure?.error) {
     const message = initialFailure.error.code === "PGRST202"
-      ? "Ledger database functions are missing from the API schema cache. Verify that 202611020002_doctor_ledger_workspace.sql was applied and the RPC definitions exist before reloading the PostgREST schema cache."
+      ? "Ledger database functions are missing from the API schema cache. Apply 202611140001_ledger_people_and_history.sql and reload the PostgREST schema cache before reloading this page."
       : initialFailure.error.message;
     throw new Error(`Could not load the Udhaar ledger: ${message}`);
   }
 
-  const patientRows: PatientPageResult[] = patientPageResult.data ?? [];
-  const lastTransactionResults = await Promise.all(patientRows.map((row) =>
-    supabase
-      .from("ledger_entries")
-      .select("effective_at")
-      .eq("patient_id", row.patient_id)
-      .order("effective_at", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-  ));
-  const lastTransactionFailure = lastTransactionResults.find((result) => result.error);
-  if (lastTransactionFailure?.error) {
-    throw new Error(`Could not load last ledger transaction: ${lastTransactionFailure.error.message}`);
-  }
-  const patients: LedgerPatientRow[] = patientRows.map((row, index) => ({
-    id: row.patient_id,
+  const personRows: PersonPageResult[] = personPageResult.data ?? [];
+  const people: LedgerPersonRow[] = personRows.map((row) => ({
+    id: row.person_id,
     fullName: row.full_name,
     mobile: row.mobile,
+    totalUdhaarPaise: String(row.total_udhaar_paise),
+    totalPaidPaise: String(row.total_paid_paise),
     balancePaise: String(row.balance_paise),
-    lastVisit: row.last_visit,
-    lastTransaction: lastTransactionResults[index]?.data?.effective_at ?? null,
   }));
-  const totalCount = Number(patientRows[0]?.total_count ?? 0);
+  const totalCount = Number(personRows[0]?.total_count ?? 0);
   const totalsRow = totalsResult.data?.[0];
+  const personOptions: PersonOptionResult[] = personOptionsResult.data ?? [];
+  const activePersonIds = new Set((activePeopleResult.data ?? []).map((person) => person.id));
+  const totalUdhaarPaise = personOptions.reduce(
+    (total, person) => total + BigInt(person.total_udhaar_paise),
+    0n,
+  );
   const totals: LedgerTotals = {
     outstandingPaise: String(accountResult.data?.outstanding_paise ?? 0),
     patientsWithBalance: Number(accountResult.data?.patients_owing ?? 0),
-    creditChargesPaise: String(totalsRow?.credit_charges_paise ?? 0),
-    openingDuesPaise: String(totalsRow?.opening_dues_paise ?? 0),
+    totalUdhaarPaise: String(totalUdhaarPaise),
     collectedPaise: String(totalsRow?.collected_paise ?? 0),
   };
-  const patientOptions = (patientOptionsResult.data ?? []).map((patient) => ({
-    id: patient.id,
-    fullName: patient.full_name,
-    mobile: patient.mobile,
-  }));
-  for (const patient of patients) {
-    if (!patientOptions.some((option) => option.id === patient.id)) {
-      patientOptions.push({ id: patient.id, fullName: patient.fullName, mobile: patient.mobile });
-    }
-  }
-  const selectedPatientId = requestedPatient ||
-    patients[0]?.id ||
-    patientOptions[0]?.id ||
+  const initialPersonId = requestedPerson ||
+    personOptions.find((person) => person.patient_id === requestedPatient)?.person_id ||
     "";
-  let initialSummary: LedgerPatientSummary | null = null;
-  if (selectedPatientId) {
-    const [patientResult, summaryResult, entriesResult] = await Promise.all([
-      supabase.from("patients").select("id, full_name, mobile").eq("id", selectedPatientId).maybeSingle(),
-      supabase.rpc("patient_ledger_summary", { p_patient_id: selectedPatientId }),
-      supabase
-        .from("ledger_entries")
-        .select("id, entry_type, amount_paise, description, effective_at")
-        .eq("patient_id", selectedPatientId)
-        .order("effective_at", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(5),
-    ]);
-    const summaryFailure = [patientResult, summaryResult, entriesResult].find((result) => result.error);
-    if (summaryFailure?.error) throw new Error(`Could not load the selected patient’s ledger: ${summaryFailure.error.message}`);
-    const patient = patientResult.data;
-    const summary = summaryResult.data?.[0];
-    if (patient && summary) {
-      initialSummary = {
-        patient: { id: patient.id, fullName: patient.full_name, mobile: patient.mobile },
-        openingDuesPaise: String(summary.opening_dues_paise),
-        chargesPaise: String(summary.credit_charges_paise),
-        paymentsPaise: String(summary.collected_paise),
-        balancePaise: String(summary.balance_paise),
-        recentEntries: (entriesResult.data ?? []).map((entry) => ({
-          id: entry.id,
-          entryType: entry.entry_type,
-          amountPaise: String(entry.amount_paise),
-          description: entry.description,
-          effectiveAt: entry.effective_at,
-        })),
-      };
-      if (!patientOptions.some((item) => item.id === patient.id)) patientOptions.unshift({
-        id: patient.id,
-        fullName: patient.full_name,
-        mobile: patient.mobile,
-      });
-    }
-  }
+
+  const options: LedgerPersonOption[] = personOptions.filter((person) => activePersonIds.has(person.person_id)).map((person) => ({
+    id: person.person_id,
+    fullName: person.full_name,
+    mobile: person.mobile,
+    balancePaise: String(person.balance_paise),
+  }));
 
   return (
     <LedgerWorkspace
-      key={`${search}-${balanceFilter}-${sort}-${direction}-${page}-${selectedPatientId}`}
-      patients={patients}
-      patientOptions={patientOptions}
+      key={`${search}-${balanceFilter}-${sort}-${direction}-${page}-${initialPersonId}`}
+      people={people}
+      personOptions={options}
       totalCount={totalCount}
       page={page}
       search={search}
@@ -160,7 +127,7 @@ export default async function AccountsPage({
       sort={sort}
       direction={direction}
       totals={totals}
-      initialSummary={initialSummary}
+      initialPersonId={initialPersonId}
       autoTransaction={autoTransaction}
     />
   );
