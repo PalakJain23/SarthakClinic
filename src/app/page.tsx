@@ -1,7 +1,7 @@
 import { ClinicHome } from "@/components/clinic-home";
 import { getPublicClinicData } from "@/lib/clinic-data";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const clinic = await getPublicClinicData();

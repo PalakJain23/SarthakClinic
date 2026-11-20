@@ -54,6 +54,7 @@ export async function POST(request: Request) {
     p_patient_name: parsed.data.patientName,
     p_mobile: mobile,
     p_session_id: parsed.data.sessionId,
+    p_doctor_id: parsed.data.doctorId || null,
     p_preferred_time: parsed.data.preferredTime || null,
     p_age: parsed.data.age === "" ? null : parsed.data.age,
     p_reason: parsed.data.reason || null,
@@ -62,6 +63,13 @@ export async function POST(request: Request) {
   });
 
   if (error) {
+    if (error.code === "PGRST202") {
+      console.error("Public doctor-aware booking RPC is unavailable", { code: error.code });
+      return NextResponse.json(
+        { error: "booking_setup_required" },
+        { status: 503 },
+      );
+    }
     if (error.message.includes("Invalid mobile number")) {
       return NextResponse.json({ error: "invalid_mobile" }, { status: 400 });
     }
@@ -71,6 +79,15 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json(
         { error: "This session is no longer available. Refresh and choose another." },
+        { status: 409 },
+      );
+    }
+    if (
+      error.message.includes("Doctor is not available for booking") ||
+      error.message.includes("Session is outside the doctor availability")
+    ) {
+      return NextResponse.json(
+        { error: "doctor_unavailable" },
         { status: 409 },
       );
     }

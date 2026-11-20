@@ -2,7 +2,7 @@ import type { PublicClinicData, PublicLocation, PublicSession } from "@/lib/clin
 
 export const SAMPLE_PUBLIC_CONTENT = {
   clinicName: "Sarthak Clinic",
-  doctorName: "Subhal Thakur",
+  doctorName: "Subhal Singh Thakur",
   qualification: "",
   speciality: "",
   registrationInfo: "",
@@ -99,5 +99,6 @@ export function getSamplePublicClinic({
     whatsapp: SAMPLE_PUBLIC_CONTENT.publicWhatsApp,
     locations,
     sessions,
+    additionalDoctors: [],
   };
 }

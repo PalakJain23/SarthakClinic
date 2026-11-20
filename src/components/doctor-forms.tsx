@@ -766,7 +766,7 @@ export function ProfileForm({
           </div>
           <div className="min-w-0">
             <span className="inline-flex rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900">Clinic Owner</span>
-            <h2 className="mt-1 break-words text-lg font-bold text-slate-950">{values.doctorName || "Subhal Thakur"}</h2>
+            <h2 className="mt-1 break-words text-lg font-bold text-slate-950">{values.doctorName || "Subhal Singh Thakur"}</h2>
             {values.qualification ? (
               <p className="mt-0.5 text-sm text-slate-600">Qualification: {values.qualification}</p>
             ) : (
@@ -785,7 +785,7 @@ export function ProfileForm({
       <Feedback state={state} />
       {editing && (
         <form action={action} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-          <label className="text-sm font-semibold">Full name <input name="doctorName" defaultValue={values.doctorName || "Subhal Thakur"} required maxLength={120} className="mt-1.5 min-h-11 w-full rounded-lg border border-slate-300 px-3 font-normal" /></label>
+          <label className="text-sm font-semibold">Full name <input name="doctorName" defaultValue={values.doctorName || "Subhal Singh Thakur"} required maxLength={120} className="mt-1.5 min-h-11 w-full rounded-lg border border-slate-300 px-3 font-normal" /></label>
           <div className="flex items-center gap-3">
             <div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-teal-50 text-teal-700">
               {photoPreview || values.doctorPhotoUrl ? (

@@ -12,6 +12,7 @@ export const bookingSchema = z.object({
   patientName: z.string().trim().min(2).max(100),
   mobile: z.string().trim().min(10).max(18),
   sessionId: z.string().uuid(),
+  doctorId: z.string().uuid().optional().or(z.literal("")),
   preferredTime: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/)

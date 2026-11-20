@@ -37,6 +37,11 @@ test("booking validation requires privacy acknowledgement and an unpredictable-k
     idempotencyKey: "987e4567-e89b-42d3-a456-426614174000",
   };
   assert.equal(bookingSchema.safeParse(valid).success, true);
+  assert.equal(bookingSchema.safeParse({
+    ...valid,
+    doctorId: "123e4567-e89b-42d3-a456-426614174000",
+  }).success, true);
+  assert.equal(bookingSchema.safeParse({ ...valid, doctorId: "unknown-doctor" }).success, false);
   assert.equal(bookingSchema.safeParse({ ...valid, privacyAcknowledged: false }).success, false);
   assert.equal(bookingSchema.safeParse({ ...valid, idempotencyKey: "not-a-uuid" }).success, false);
   assert.equal(bookingSchema.safeParse({ ...valid, age: true }).success, false);
@@ -50,7 +55,7 @@ test("sample public schedule is preview-only and uses the configured local times
   });
   assert.equal(preview.isSampleProfile, true);
   assert.equal(preview.isSampleAvailability, true);
-  assert.equal(preview.doctorName, "Subhal Thakur");
+  assert.equal(preview.doctorName, "Subhal Singh Thakur");
   assert.equal(preview.qualification, "");
   assert.equal(preview.speciality, "");
   assert.equal(preview.registrationInfo, "");
@@ -58,6 +63,7 @@ test("sample public schedule is preview-only and uses the configured local times
   assert.equal(preview.whatsapp, "+919229681235");
   assert.equal(SAMPLE_PUBLIC_CONTENT.publicPhoneDisplay, "+91 92296 81235");
   assert.equal(preview.sessions.length, 14);
+  assert.deepEqual(preview.additionalDoctors, []);
   assert.ok(preview.sessions.every((session) => session.isSample && session.status === "closed"));
   assert.deepEqual(
     preview.sessions.slice(0, 2).map(({ startsAt, endsAt }) => [startsAt, endsAt]),

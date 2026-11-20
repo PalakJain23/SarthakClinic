@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { needsSignIn } from "@/lib/auth-errors";
 
 export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,14 +31,21 @@ export async function proxy(request: NextRequest) {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
+  function withSessionCookies(result: NextResponse) {
+    for (const cookie of response.cookies.getAll()) result.cookies.set(cookie);
+    result.headers.set("Cache-Control", "private, no-store");
+    return result;
+  }
   if (authError) {
-    if (isApi) return NextResponse.json({ error: "Authentication is temporarily unavailable." }, { status: 503 });
-    return NextResponse.redirect(new URL("/doctor/login?setup=auth", request.url));
+    const signIn = needsSignIn(authError);
+    if (!signIn) console.error("Session verification failed", { code: authError.code, status: authError.status });
+    if (isApi) return withSessionCookies(NextResponse.json({ error: signIn ? "Authentication required." : "Authentication is temporarily unavailable." }, { status: signIn ? 401 : 503 }));
+    return withSessionCookies(NextResponse.redirect(new URL(signIn ? "/doctor/login" : "/doctor/login?setup=auth", request.url)));
   }
 
   if (!user) {
-    if (isApi) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    return NextResponse.redirect(new URL("/doctor/login", request.url));
+    if (isApi) return withSessionCookies(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
+    return withSessionCookies(NextResponse.redirect(new URL("/doctor/login", request.url)));
   }
 
   if (isApi) {
@@ -47,13 +55,13 @@ export async function proxy(request: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
     if (error) {
-      return NextResponse.json({ error: "Doctor authorization is temporarily unavailable." }, { status: 503 });
+      return withSessionCookies(NextResponse.json({ error: "Doctor authorization is temporarily unavailable." }, { status: 503 }));
     }
     if (!authorization) {
-      return NextResponse.json({ error: "Doctor authorization required." }, { status: 403 });
+      return withSessionCookies(NextResponse.json({ error: "Doctor authorization required." }, { status: 403 }));
     }
   }
-  return response;
+  return withSessionCookies(response);
 }
 
 export const config = {

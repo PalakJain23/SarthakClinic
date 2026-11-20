@@ -21,7 +21,7 @@ export default async function SettingsPage() {
     <SettingsWorkspace
       profile={{
         clinicName: profile?.clinic_name ?? "Sarthak Clinic",
-        doctorName: profile?.doctor_name?.trim() || "Subhal Thakur",
+        doctorName: profile?.doctor_name?.trim() || "Subhal Singh Thakur",
         qualification: profile?.qualification ?? "",
         speciality: profile?.speciality ?? "",
         registrationInfo: profile?.registration_info ?? "",

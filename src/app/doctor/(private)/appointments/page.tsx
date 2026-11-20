@@ -1,4 +1,4 @@
-import { AppointmentWorkspace, type AppointmentRecord, type AppointmentSessionOption } from "@/components/appointment-workspace";
+import { AppointmentWorkspace, type AppointmentRecord, type AppointmentSessionOption, type AppointmentDoctorOption } from "@/components/appointment-workspace";
 import { indiaDate } from "@/lib/format";
 import { requireDoctor } from "@/lib/doctor-auth";
 
@@ -8,7 +8,7 @@ export default async function AppointmentsPage() {
   const { supabase } = await requireDoctor();
   const today = indiaDate();
   const future = indiaDate(90);
-  const [appointmentResult, patientResult, sessionResult] = await Promise.all([
+  const [appointmentResult, patientResult, sessionResult, doctorResult, doctorAssignmentResult] = await Promise.all([
     supabase
       .from("appointments")
       .select("id, booking_reference, patient_id, patient_name, mobile, status, preferred_time, reason, needs_contact, session_id, created_at, availability_sessions!inner(id, session_date, starts_at, ends_at, public_note, private_note, clinic_locations(name, public_address))")
@@ -22,10 +22,23 @@ export default async function AppointmentsPage() {
       .lte("session_date", future)
       .order("session_date")
       .order("starts_at"),
+    supabase
+      .from("clinic_doctors")
+      .select("id, details")
+      .order("created_at"),
+    supabase
+      .from("appointments")
+      .select("id, doctor_id"),
   ]);
   if (appointmentResult.error) throw new Error(`Could not load appointments: ${appointmentResult.error.message}`);
   if (patientResult.error) throw new Error(`Could not load patient options: ${patientResult.error.message}`);
   if (sessionResult.error) throw new Error(`Could not load appointment sessions: ${sessionResult.error.message}`);
+
+  const doctorIdByAppointment = new Map(
+    (doctorAssignmentResult.data ?? []).map((row) =>
+      [row.id, (row as unknown as { doctor_id?: string | null }).doctor_id ?? null] as const
+    ),
+  );
 
   const appointments: AppointmentRecord[] = (appointmentResult.data ?? []).flatMap((row) => {
     const session = row.availability_sessions as unknown as {
@@ -49,6 +62,7 @@ export default async function AppointmentsPage() {
       preferredTime: row.preferred_time,
       needsContact: row.needs_contact,
       createdAt: row.created_at,
+      doctorId: doctorIdByAppointment.get(row.id) ?? null,
       session: {
         id: session.id,
         date: session.session_date,
@@ -84,12 +98,29 @@ export default async function AppointmentsPage() {
     }
   }
   sessions.sort((left, right) => left.date.localeCompare(right.date) || left.startsAt.localeCompare(right.startsAt));
+  const doctors: AppointmentDoctorOption[] = (doctorResult.data ?? []).flatMap((row) => {
+    const details = row.details as {
+      fullName?: unknown;
+      specialty?: unknown;
+      status?: unknown;
+    } | null;
+    if (
+      !details ||
+      typeof details.fullName !== "string" ||
+      typeof details.specialty !== "string" ||
+      details.status !== "Active"
+    ) {
+      return [];
+    }
+    return [{ id: row.id, name: details.fullName, specialty: details.specialty }];
+  });
 
   return (
     <AppointmentWorkspace
       today={today}
       appointments={appointments}
       sessions={sessions}
+      doctors={doctors}
       patients={(patientResult.data ?? []).map((patient) => ({
         id: patient.id,
         fullName: patient.full_name,

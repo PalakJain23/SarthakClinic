@@ -19,22 +19,39 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import type { PublicClinicData, PublicSession } from "@/lib/clinic-data";
+import type { PublicClinicData, PublicDoctor, PublicSession } from "@/lib/clinic-data";
 import { normalizeIndianMobile } from "@/lib/booking-schema";
+import {
+  getBookableDoctorSessions,
+  getNextBookableDoctorSession,
+  getNextVisibleDoctorSchedule,
+  getNextSessionEndDelay,
+  indiaDateTime,
+  isSessionBookableNow,
+  sessionHasNotEnded,
+  type VisibleDoctorSchedule,
+} from "@/lib/doctor-availability";
 
 type Language = "hi" | "en";
 
-type PublishedDoctor = {
-  id: string;
-  fullName: string;
-  specialty: string;
-  doctorType: "regular" | "visiting";
-  qualification?: string | null;
-  visitingDays?: string | null;
-  visitingHours?: string | null;
-  photoUrl?: string | null;
-  profileHref?: string | null;
-};
+type PublishedDoctor = PublicDoctor;
+
+function bookableSessionsForDoctor(
+  doctorId: string,
+  doctors: PublishedDoctor[],
+  sessions: PublicSession[],
+  now: Date,
+) {
+  if (!doctorId) {
+    return sessions.filter((session) =>
+      !session.doctorId && isSessionBookableNow(session, now),
+    );
+  }
+  const doctor = doctors.find((item) => item.id === doctorId);
+  return doctor
+    ? getBookableDoctorSessions(doctor.id, doctor.schedule, sessions, now)
+    : [];
+}
 
 const copy = {
   hi: {
@@ -69,12 +86,26 @@ const copy = {
     findDoctorTitle: "क्लिनिक संचालक",
     findDoctorSubtitle: "सार्थक क्लिनिक के संचालक की सार्वजनिक प्रोफ़ाइल।",
     viewAllDoctors: "प्रोफ़ाइल देखें",
+    additionalDoctorsTitle: "अन्य डॉक्टर",
+    additionalDoctorsDescription: "उनकी विशेषज्ञता और क्लिनिक में उपलब्ध समय देखें।",
     regularDoctor: "नियमित डॉक्टर",
     visitingSpecialist: "विज़िटिंग विशेषज्ञ",
     doctorPortrait: "डॉक्टर का चित्र",
     visitingDays: "आने के दिन",
     visitingHours: "समय",
     viewProfile: "प्रोफ़ाइल देखें",
+    bookDoctor: "इस डॉक्टर के लिए बुक करें",
+    chooseDoctor: "डॉक्टर चुनें",
+    clinicOwnerOption: "क्लिनिक संचालक",
+    noDoctorSessions: "इस डॉक्टर के चुने समय में अभी कोई खुला क्लिनिक सत्र नहीं है।",
+    noUpcomingAvailability: "अभी कोई आगामी उपलब्धता नहीं है।",
+    onlineBookingUnavailable: "ऑनलाइन बुकिंग उपलब्ध नहीं है — कृपया क्लिनिक से संपर्क करें।",
+    nextSession: "अगला उपलब्ध सत्र",
+    sessionLocation: "स्थान",
+    bookingSetupRequired: "बुकिंग व्यवस्था अपडेट हो रही है। कृपया क्लिनिक से संपर्क करें।",
+    weeklySchedule: "हर सप्ताह",
+    specificSchedule: "विशेष तारीख़",
+    unconfirmedSchedule: "समय की पुष्टि बाकी",
     noSchedule: "उपलब्ध समय देखने के लिए कृपया फिर से जाँचें।",
     open: "बुकिंग अनुरोध खुले हैं",
     closed: "बुकिंग बंद है",
@@ -92,7 +123,7 @@ const copy = {
     bookingGuideTitle: "अपॉइंटमेंट कैसे लें",
     bookingStepOneTitle: "क्लिनिक सत्र देखें",
     bookingStepOneDescription:
-      "उपलब्ध समय और स्थान देखें। अभी डॉक्टर चुनने की सुविधा उपलब्ध नहीं है।",
+      "डॉक्टर, उपलब्ध समय और स्थान चुनें।",
     bookingStepTwoTitle: "अपॉइंटमेंट अनुरोध भेजें",
     bookingStepTwoDescription:
       "पसंदीदा तारीख़ और उपलब्ध सत्र चुनकर अनुरोध भेजें।",
@@ -121,6 +152,8 @@ const copy = {
     optionalNote: "डॉक्टर का नोट",
     bookingTitle: "मुलाक़ात का अनुरोध",
     bookingDate: "तारीख़ चुनें",
+    selectDate: "दूसरी तारीख़ चुनें",
+    sessionExpiredChooseAnother: "यह सत्र अब उपलब्ध नहीं है। कृपया दूसरा सत्र चुनें।",
     bookingSession: "समय और स्थान चुनें",
     selectSession: "सत्र चुनें",
     name: "मरीज़ का नाम",
@@ -136,7 +169,7 @@ const copy = {
     sending: "भेजा जा रहा है…",
     pending: "डॉक्टर की पुष्टि बाकी",
     bookingSuccess:
-      "आपका अनुरोध दर्ज हुआ है। डॉक्टर से पुष्टि होने तक यह अपॉइंटमेंट पक्का नहीं है।",
+      "आपका अनुरोध दर्ज हुआ है। क्लिनिक पुष्टि के लिए WhatsApp या फ़ोन से संपर्क करेगा। पुष्टि मिलने तक अपॉइंटमेंट पक्का नहीं है। अपना बुकिंग संदर्भ सुरक्षित रखें।",
     reference: "अनुरोध संदर्भ",
     noSessions: "इस तारीख़ के लिए कोई उपलब्ध सत्र नहीं है।",
     requestError: "अनुरोध भेजा नहीं जा सका। कृपया फिर कोशिश करें।",
@@ -179,12 +212,26 @@ const copy = {
     findDoctorTitle: "Clinic Owner",
     findDoctorSubtitle: "The public profile of the Sarthak Clinic owner.",
     viewAllDoctors: "View Profile",
+    additionalDoctorsTitle: "Additional Doctors",
+    additionalDoctorsDescription: "See their specialties and clinic visiting hours.",
     regularDoctor: "Regular Doctor",
     visitingSpecialist: "Visiting Specialist",
     doctorPortrait: "Portrait of",
     visitingDays: "Visiting days",
     visitingHours: "Visiting hours",
     viewProfile: "View Profile",
+    bookDoctor: "Book this doctor",
+    chooseDoctor: "Choose a doctor",
+    clinicOwnerOption: "Clinic Owner",
+    noDoctorSessions: "No open clinic session matches this doctor's listed schedule yet.",
+    noUpcomingAvailability: "No upcoming availability",
+    onlineBookingUnavailable: "Online booking unavailable — contact clinic",
+    nextSession: "Next available session",
+    sessionLocation: "Location",
+    bookingSetupRequired: "Online booking is being updated. Please contact the clinic directly.",
+    weeklySchedule: "Every week",
+    specificSchedule: "Specific date",
+    unconfirmedSchedule: "Schedule not confirmed",
     noSchedule: "Please check back for available timings.",
     open: "Booking requests open",
     closed: "Bookings closed",
@@ -202,7 +249,7 @@ const copy = {
     bookingGuideTitle: "How to Book an Appointment",
     bookingStepOneTitle: "Explore Clinic Sessions",
     bookingStepOneDescription:
-      "Review available times and locations. Doctor selection is not available yet.",
+      "Choose a doctor, then review matching open times and locations.",
     bookingStepTwoTitle: "Request an Appointment",
     bookingStepTwoDescription:
       "Choose a preferred date and available session, then send your request.",
@@ -231,6 +278,8 @@ const copy = {
     optionalNote: "Doctor’s note",
     bookingTitle: "Request a visit",
     bookingDate: "Choose a date",
+    selectDate: "Choose another date",
+    sessionExpiredChooseAnother: "This session is no longer available. Please select another.",
     bookingSession: "Choose a session and location",
     selectSession: "Select a session",
     name: "Patient name",
@@ -246,7 +295,7 @@ const copy = {
     sending: "Sending…",
     pending: "Pending doctor confirmation",
     bookingSuccess:
-      "Your request was recorded. It is not a confirmed appointment until the doctor confirms it.",
+      "Your request was received. The clinic will contact you by WhatsApp or phone to confirm. This is not yet a confirmed appointment. Please keep your booking reference.",
     reference: "Request reference",
     noSessions: "There are no available sessions for this date.",
     requestError: "Could not send your request. Please try again.",
@@ -259,19 +308,22 @@ const copy = {
   },
 } as const;
 
-// Doctor Management is local-only, so only a verified public source should populate this list.
-const publishedDoctors: PublishedDoctor[] = [];
-
 function PublicDoctorCard({
   doctor,
+  visibleSchedule,
+  nextSession,
   language,
+  onBook,
 }: {
   doctor: PublishedDoctor;
+  visibleSchedule: VisibleDoctorSchedule | null;
+  nextSession: PublicSession | null;
   language: Language;
+  onBook: (doctorId: string) => void;
 }) {
   const t = copy[language];
   const typeLabel =
-    doctor.doctorType === "regular" ? t.regularDoctor : t.visitingSpecialist;
+    doctor.doctorType === "Regular" ? t.regularDoctor : t.visitingSpecialist;
 
   return (
     <article className="flex h-full flex-col rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm sm:p-5">
@@ -293,7 +345,7 @@ function PublicDoctorCard({
         <div className="min-w-0 flex-1">
           <span
             className={`inline-flex max-w-full rounded-full px-2.5 py-1 text-xs font-semibold ${
-              doctor.doctorType === "regular"
+              doctor.doctorType === "Regular"
                 ? "bg-emerald-50 text-emerald-800"
                 : "bg-teal-50 text-teal-800"
             }`}
@@ -312,45 +364,44 @@ function PublicDoctorCard({
         </div>
       </div>
 
-      {(doctor.visitingDays || doctor.visitingHours) && (
-        <div className="mt-4 space-y-2 border-t border-emerald-50 pt-3 text-sm text-slate-700">
-          {doctor.visitingDays && (
+      <div className="mt-4 space-y-2 border-t border-emerald-50 pt-3 text-sm text-slate-700">
+        {visibleSchedule ? (
+          <>
             <p className="flex items-start gap-2">
-              <CalendarDays
-                className="mt-0.5 shrink-0 text-emerald-700"
-                size={16}
-                aria-hidden="true"
-              />
-              <span>
-                <span className="font-semibold">{t.visitingDays}: </span>
-                {doctor.visitingDays}
-              </span>
+              <CalendarDays size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-700" />
+              <span><span className="font-semibold">{t.visitingDays}: </span>{dateLabel(visibleSchedule.date, language)}</span>
             </p>
-          )}
-          {doctor.visitingHours && (
             <p className="flex items-start gap-2">
-              <Clock3
-                className="mt-0.5 shrink-0 text-emerald-700"
-                size={16}
-                aria-hidden="true"
-              />
-              <span>
-                <span className="font-semibold">{t.visitingHours}: </span>
-                {doctor.visitingHours}
-              </span>
+              <Clock3 size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-700" />
+              <span><span className="font-semibold">{t.visitingHours}: </span>{timeLabel(visibleSchedule.startTime)}–{timeLabel(visibleSchedule.endTime)}</span>
             </p>
-          )}
-        </div>
-      )}
+            {nextSession ? (
+              <>
+                <p className="flex items-start gap-2">
+                  <CalendarDays size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-700" />
+                  <span><span className="font-semibold">{t.nextSession}: </span>{dateLabel(nextSession.date, language)} · {timeLabel(nextSession.startsAt)}–{timeLabel(nextSession.endsAt)}</span>
+                </p>
+                <p className="flex items-start gap-2">
+                  <MapPin size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-700" />
+                  <span><span className="font-semibold">{t.sessionLocation}: </span>{locationText(nextSession.locationName, language)}{nextSession.address ? ` · ${locationText(nextSession.address, language)}` : ""}</span>
+                </p>
+              </>
+            ) : (
+              <p className="text-slate-500">{t.onlineBookingUnavailable}</p>
+            )}
+          </>
+        ) : <p className="text-slate-500">{t.noUpcomingAvailability}</p>}
+      </div>
 
-      {doctor.profileHref && (
-        <a
-          href={doctor.profileHref}
-          className="mt-auto inline-flex min-h-10 items-center gap-1 pt-4 text-sm font-semibold text-emerald-800 hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+      {nextSession && (
+        <button
+          type="button"
+          onClick={() => onBook(doctor.id)}
+          className="mt-auto inline-flex min-h-10 items-center gap-1 pt-4 text-left text-sm font-semibold text-emerald-800 hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
         >
-          {t.viewProfile}
+          {t.bookDoctor}
           <ArrowUpRight size={16} aria-hidden="true" />
-        </a>
+        </button>
       )}
     </article>
   );
@@ -362,17 +413,6 @@ function locationText(value: string, language: Language) {
   if (value === "Village consultation") return "ग्राम परामर्श";
   if (value === "Sarthak Clinic, Ashta") return "सार्थक क्लिनिक, आष्टा";
   return value;
-}
-
-function todayIndia() {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, Number(part.value)]));
-  return `${values.year}-${String(values.month).padStart(2, "0")}-${String(values.day).padStart(2, "0")}`;
 }
 
 function dateLabel(date: string, language: Language) {
@@ -442,9 +482,11 @@ function phoneDisplay(value: string | null) {
 }
 
 export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
+  const [now, setNow] = useState(() => new Date());
   const [language, setLanguage] = useState<Language>("hi");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedSession, setSelectedSession] = useState("");
   const [formState, setFormState] = useState<"idle" | "sending" | "success" | "error">("idle");
@@ -459,20 +501,28 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
   const verifiedLocations = clinic.isSampleLocations ? [] : clinic.locations;
   const verifiedPhone = clinic.isSamplePhone ? null : clinic.phone;
   const verifiedWhatsApp = clinic.isSampleWhatsApp ? null : clinic.whatsapp;
+  const publishedDoctors = clinic.additionalDoctors;
   const clinicInfoPhoneHref = safePhone(verifiedPhone);
   const clinicInfoWhatsAppHref = safePhone(verifiedWhatsApp, true);
   const clinicInfoPhoneDisplay = phoneDisplay(verifiedPhone);
-  const today = todayIndia();
-  const todaySessions = clinic.sessions.filter((session) => session.date === today);
-  const dates = useMemo(
-    () => [...new Set(clinic.sessions.map((session) => session.date))].sort(),
-    [clinic.sessions],
+  const today = indiaDateTime(now).date;
+  const todaySessions = clinic.sessions.filter(
+    (session) => session.date === today && sessionHasNotEnded(session, now),
   );
-  const sessionsOnSelectedDate = clinic.sessions.filter(
+  const sessionsForSelectedDoctor = bookableSessionsForDoctor(
+    selectedDoctor,
+    publishedDoctors,
+    clinic.sessions,
+    now,
+  );
+  const dates = useMemo(
+    () => [...new Set(sessionsForSelectedDoctor.map((session) => session.date))].sort(),
+    [sessionsForSelectedDoctor],
+  );
+  const sessionsOnSelectedDate = sessionsForSelectedDoctor.filter(
     (session) =>
       session.date === selectedDate &&
-      session.status === "open" &&
-      session.date >= today,
+      isSessionBookableNow(session, now),
   );
   const chosenSession = clinic.sessions.find((session) => session.id === selectedSession);
 
@@ -493,9 +543,53 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
   }, [mobileMenuOpen]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => router.refresh(), 60_000);
-    return () => window.clearInterval(timer);
-  }, [router]);
+    const refreshAvailability = () => {
+      const current = new Date();
+      if (bookingOpen && formState !== "success" && selectedSession) {
+        const selectedIsBookable = bookableSessionsForDoctor(
+          selectedDoctor,
+          publishedDoctors,
+          clinic.sessions,
+          current,
+        ).some((session) => session.id === selectedSession && session.date === selectedDate);
+        if (!selectedIsBookable) {
+          setSelectedSession("");
+          setSelectedDate("");
+          setFormState("error");
+          setFormMessage(t.sessionExpiredChooseAnother);
+        }
+      }
+      setNow(current);
+      router.refresh();
+    };
+    const nextEndDelay = getNextSessionEndDelay(clinic.sessions, now);
+    const expiryTimer = nextEndDelay === null
+      ? null
+      : window.setTimeout(refreshAvailability, Math.min(nextEndDelay, 2_147_483_647));
+    const refreshTimer = window.setInterval(refreshAvailability, 60_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshAvailability();
+    };
+    window.addEventListener("focus", refreshAvailability);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      if (expiryTimer !== null) window.clearTimeout(expiryTimer);
+      window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshAvailability);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [
+    bookingOpen,
+    clinic.sessions,
+    formState,
+    now,
+    publishedDoctors,
+    router,
+    selectedDate,
+    selectedDoctor,
+    selectedSession,
+    t.sessionExpiredChooseAnother,
+  ]);
 
   useEffect(() => {
     if (!bookingOpen) {
@@ -530,19 +624,27 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [bookingOpen]);
 
-  function openBooking() {
+  function openBooking(doctorId = "") {
     triggerRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFormState("idle");
     setFormMessage("");
     setBookingReference("");
     idempotencyRef.current = { fingerprint: "", key: "" };
-    const firstOpen = clinic.sessions.find(
-      (session) => session.status === "open" && session.date >= today,
-    );
-    setSelectedDate(firstOpen?.date ?? dates[0] ?? "");
+    setSelectedDoctor(doctorId);
+    const doctorSessions = bookableSessionsForDoctor(doctorId, publishedDoctors, clinic.sessions, new Date());
+    const firstOpen = doctorSessions[0];
+    setSelectedDate(firstOpen?.date ?? "");
     setSelectedSession(firstOpen?.id ?? "");
     setBookingOpen(true);
+  }
+
+  function changeBookingDoctor(doctorId: string) {
+    setSelectedDoctor(doctorId);
+    const doctorSessions = bookableSessionsForDoctor(doctorId, publishedDoctors, clinic.sessions, new Date());
+    const firstOpen = doctorSessions[0];
+    setSelectedDate(firstOpen?.date ?? "");
+    setSelectedSession(firstOpen?.id ?? "");
   }
 
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
@@ -565,6 +667,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
     if (
       !selected ||
       selected.date !== selectedDate ||
+      !isSessionBookableNow(selected, new Date()) ||
       selected.isSample ||
       clinic.isDemo ||
       clinic.isSampleAvailability
@@ -576,7 +679,8 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
     const payload = {
       patientName: formData.get("patientName"),
       mobile,
-      sessionId: selected.id,
+      sessionId: selected.bookingSessionId ?? selected.id,
+      doctorId: selected.doctorId ?? "",
       preferredTime: formData.get("preferredTime") || "",
       age: formData.get("age") || "",
       reason: formData.get("reason") || "",
@@ -604,7 +708,13 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
       if (!response.ok || !result.bookingReference) {
         setFormState("error");
         setFormMessage(
-          result.error === "invalid_mobile" ? t.mobileError : t.requestError,
+          result.error === "invalid_mobile"
+            ? t.mobileError
+            : result.error === "doctor_unavailable"
+              ? t.noDoctorSessions
+              : result.error === "booking_setup_required"
+                ? t.bookingSetupRequired
+              : t.requestError,
         );
         return;
       }
@@ -681,7 +791,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
             </div>
             <button
               type="button"
-              onClick={openBooking}
+              onClick={() => openBooking()}
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-4"
             >
               <CalendarDays size={17} aria-hidden="true" />
@@ -738,7 +848,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
               <div className="mt-6 flex flex-wrap gap-2 sm:gap-3">
                 <button
                   type="button"
-                  onClick={openBooking}
+                  onClick={() => openBooking()}
                   className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-5"
                 >
                   {t.bookAppointment}
@@ -840,7 +950,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
                 </div>
                 <div className="min-w-0">
                   <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-900">{t.clinicOwner}</span>
-                  <h3 className="mt-2 break-words text-lg font-bold text-emerald-950">{clinic.doctorName || "Subhal Thakur"}</h3>
+                  <h3 className="mt-2 break-words text-lg font-bold text-emerald-950">{clinic.doctorName || "Subhal Singh Thakur"}</h3>
                   {clinic.qualification && (
                     <p className="mt-2 text-sm leading-5 text-slate-700">
                       <span className="font-semibold">{t.verifiedQualifications}: </span>{clinic.qualification}
@@ -869,10 +979,23 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
               </p>
             </article>
             {publishedDoctors.length > 0 && (
-              <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
-                {publishedDoctors.map((doctor) => (
-                  <PublicDoctorCard key={doctor.id} doctor={doctor} language={language} />
-                ))}
+              <div className="lg:col-span-2">
+                <div className="mb-3">
+                  <h3 className="text-lg font-bold text-emerald-950">{t.additionalDoctorsTitle}</h3>
+                  <p className="mt-1 text-sm text-slate-600">{t.additionalDoctorsDescription}</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {publishedDoctors.map((doctor) => (
+                    <PublicDoctorCard
+                      key={doctor.id}
+                      doctor={doctor}
+                      visibleSchedule={getNextVisibleDoctorSchedule(doctor.schedule, now)}
+                      nextSession={getNextBookableDoctorSession(doctor.id, doctor.schedule, clinic.sessions, now)}
+                      language={language}
+                      onBook={openBooking}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -977,7 +1100,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
             <div className="border-t border-emerald-100 px-4 py-3 sm:px-6">
               <button
                 type="button"
-                onClick={openBooking}
+                onClick={() => openBooking()}
                 className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-5 text-sm font-semibold text-white hover:bg-[var(--primary-dark)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
               >
                 {t.bookingGuideAction}
@@ -1242,7 +1365,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
               )}
               <button
                 type="button"
-                onClick={openBooking}
+                onClick={() => openBooking()}
                 className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
               >
                 {t.bookingGuideAction}
@@ -1261,7 +1384,7 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
 
       <button
         type="button"
-        onClick={openBooking}
+        onClick={() => openBooking()}
         className="fixed inset-x-4 bottom-4 z-20 min-h-12 rounded-xl bg-[var(--primary)] px-5 font-semibold text-white shadow-lg hover:bg-[var(--primary-dark)] sm:hidden"
       >
         {t.book}
@@ -1301,13 +1424,30 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
                 <p className="mt-3 font-semibold">{t.pending}</p>
                 <p className="mt-3 font-semibold">{t.bookingSuccess}</p>
                 <p className="mt-3 text-sm">{t.reference}: <strong>{bookingReference}</strong></p>
-                <p className="mt-1 text-sm">{dateLabel(selectedDate, language)} · {chosenSession?.locationName} · {chosenSession && `${timeLabel(chosenSession.startsAt)}–${timeLabel(chosenSession.endsAt)}`}</p>
+                <p className="mt-1 text-sm">{chosenSession?.doctorName} · {dateLabel(selectedDate, language)} · {chosenSession?.locationName} · {chosenSession && `${timeLabel(chosenSession.startsAt)}–${timeLabel(chosenSession.endsAt)}`}</p>
                 {chosenSession && <p className="mt-1 text-sm">{locationText(chosenSession.address, language)}</p>}
               </div>
             ) : clinic.isSampleAvailability ? (
               <p role="status" className="rounded-xl border border-teal-100 bg-teal-50 p-5 leading-7 text-teal-950">{t.samplePreview}</p>
             ) : (
               <form className="space-y-4" onSubmit={submitBooking}>
+                <label className="block text-sm font-semibold text-slate-800">
+                  {t.chooseDoctor} <Required />
+                  <select
+                    name="doctorId"
+                    className="mt-1.5 min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal"
+                    value={selectedDoctor}
+                    onChange={(event) => changeBookingDoctor(event.target.value)}
+                    disabled={clinic.isDemo || clinic.isSampleAvailability}
+                  >
+                    <option value="">{t.clinicOwnerOption}</option>
+                    {publishedDoctors.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.fullName} · {doctor.specialty}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="block text-sm font-semibold text-slate-800">
                   {t.bookingDate} <Required />
                   <select
@@ -1316,11 +1456,17 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
                     onChange={(event) => {
                       setSelectedDate(event.target.value);
                       setSelectedSession("");
+                      setFormState("idle");
+                      setFormMessage("");
                     }}
                     required
                     disabled={dates.length === 0 || clinic.isDemo || clinic.isSampleAvailability}
                   >
-                    {dates.length === 0 && <option value="">{t.noSessions}</option>}
+                    {selectedDate === "" && (
+                      <option value="" disabled>
+                        {dates.length === 0 ? t.noSessions : t.selectDate}
+                      </option>
+                    )}
                     {dates.map((date) => (
                       <option key={date} value={date}>{dateLabel(date, language)}</option>
                     ))}
@@ -1331,7 +1477,11 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
                   <select
                     className="mt-1.5 min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal"
                     value={selectedSession}
-                    onChange={(event) => setSelectedSession(event.target.value)}
+                    onChange={(event) => {
+                      setSelectedSession(event.target.value);
+                      setFormState("idle");
+                      setFormMessage("");
+                    }}
                     required
                     disabled={sessionsOnSelectedDate.length === 0 || clinic.isDemo || clinic.isSampleAvailability}
                   >
@@ -1343,7 +1493,9 @@ export function ClinicHome({ clinic }: { clinic: PublicClinicData }) {
                     ))}
                   </select>
                   {selectedDate && sessionsOnSelectedDate.length === 0 && (
-                    <span className="mt-1 block font-normal text-slate-600">{t.noSessions}</span>
+                    <span className="mt-1 block font-normal text-slate-600">
+                      {selectedDoctor ? t.noDoctorSessions : t.noSessions}
+                    </span>
                   )}
                   {chosenSession && selectedDate === chosenSession.date && (
                     <span className="mt-1 block font-normal text-slate-600">{locationText(chosenSession.address, language)}</span>
@@ -1420,6 +1572,9 @@ function SessionCard({
     <article className="rounded-xl border border-[var(--border)] bg-white p-3.5 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="order-2 min-w-0 sm:order-1">
+          <p className="mb-1 text-sm font-semibold text-emerald-800">
+            {session.doctorName || t.clinicOwnerOption}
+          </p>
           <h3 className="text-base font-bold text-emerald-950 sm:text-lg">
             {session.isSample
               ? session.locationName === "Village consultation" ? t.sampleVillage : t.sampleClinic

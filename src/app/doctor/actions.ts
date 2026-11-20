@@ -188,6 +188,12 @@ export async function updateAppointmentStatusAction(
     .maybeSingle();
   if (error) {
     console.error("Appointment update failed", { code: error.code });
+    if (error.code === "42501") {
+      return { error: "The database denied this appointment update. Confirm authorized_doctors and the live appointments RLS/grants." };
+    }
+    if (error.code === "PGRST204") {
+      return { error: "Doctor assignment migration is missing. Apply the reviewed migration and reload the schema cache." };
+    }
     return { error: "Appointment status could not be updated." };
   }
   if (!data) return { error: "Appointment was not found. Refresh and try again." };
@@ -208,9 +214,11 @@ export async function createAppointmentAction(
   const reason = String(formData.get("reason") ?? "").trim();
   const preferredTimeInput = String(formData.get("preferredTime") ?? "").trim();
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  const doctorId = String(formData.get("doctorId") ?? "").trim();
   if (
     !uuid.safeParse(sessionId).success ||
     (patientId && !uuid.safeParse(patientId).success) ||
+    (doctorId && !uuid.safeParse(doctorId).success) ||
     !uuid.safeParse(idempotencyKey).success ||
     reason.length > 300 ||
     (preferredTimeInput && !/^([01]\d|2[0-3]):[0-5]\d$/.test(preferredTimeInput))
@@ -231,7 +239,7 @@ export async function createAppointmentAction(
       : Promise.resolve({ data: null, error: null }),
     supabase
       .from("appointments")
-      .select("id, session_id, patient_id, patient_name, mobile, reason, preferred_time")
+      .select("id, session_id, patient_id, patient_name, mobile, reason, preferred_time, doctor_id")
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle(),
   ]);
@@ -262,7 +270,8 @@ export async function createAppointmentAction(
       existing.patient_name === patientName &&
       existing.mobile === mobile &&
       existing.reason === (reason || null) &&
-      existing.preferred_time === (preferredTimeInput || null);
+      existing.preferred_time === (preferredTimeInput || null) &&
+      (existing as { doctor_id?: string | null }).doctor_id === (doctorId || null);
     return same
       ? { success: "Appointment saved.", successToken: crypto.randomUUID() }
       : { error: "This submission key was already used for a different appointment." };
@@ -279,13 +288,19 @@ export async function createAppointmentAction(
     reason: reason || null,
     privacy_acknowledged: true,
     status: "confirmed",
+    doctor_id: doctorId || null,
   });
   if (error) {
-    console.error("Appointment creation failed", { code: error.code });
+    console.error("Appointment creation failed", {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     if (error.code === "23505") {
       const { data: retryRecord, error: retryError } = await supabase
         .from("appointments")
-        .select("session_id, patient_id, patient_name, mobile, reason, preferred_time")
+        .select("session_id, patient_id, patient_name, mobile, reason, preferred_time, doctor_id")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (!retryError && retryRecord &&
@@ -294,15 +309,30 @@ export async function createAppointmentAction(
         retryRecord.patient_name === patientName &&
         retryRecord.mobile === mobile &&
         retryRecord.reason === (reason || null) &&
-        retryRecord.preferred_time === (preferredTimeInput || null)) {
+        retryRecord.preferred_time === (preferredTimeInput || null) &&
+        (retryRecord as { doctor_id?: string | null }).doctor_id === (doctorId || null)) {
         return { success: "Appointment saved.", successToken: crypto.randomUUID() };
       }
     }
-    return {
-      error: error.code === "P0001"
-        ? "This session is full or no longer accepts appointments."
-        : "Appointment could not be saved.",
-    };
+    if (error.code === "42501") {
+      if (error.message.includes("availability_sessions")) {
+        return {
+          error: "Appointment capacity checks need UPDATE permission on availability_sessions. Apply migration 202611190003_availability_capacity_lock_grant.sql; RLS still limits changes to authorized doctors.",
+        };
+      }
+      return {
+        error: "The database denied the appointment insert. Confirm the signed-in user is in authorized_doctors and that the live appointments RLS/grants are configured.",
+      };
+    }
+    if (error.code === "PGRST204") {
+      return {
+        error: "The appointment or doctor assignment column is missing from the live database. Apply the reviewed doctor/profile migration and reload the PostgREST schema cache.",
+      };
+    }
+    if (error.code === "P0001") {
+      return { error: "This session is full or no longer accepts appointments." };
+    }
+    return { error: "Appointment could not be saved. Refresh the page and verify database connectivity." };
   }
   revalidatePath("/doctor");
   revalidatePath("/doctor/appointments");
@@ -320,9 +350,11 @@ export async function updateAppointmentAction(
   const status = String(formData.get("status") ?? "");
   const preferredTime = String(formData.get("preferredTime") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
+  const doctorId = String(formData.get("doctorId") ?? "").trim();
   if (
     !uuid.safeParse(appointmentId).success ||
     !uuid.safeParse(sessionId).success ||
+    (doctorId && !uuid.safeParse(doctorId).success) ||
     !["requested", "confirmed", "waiting", "consulting", "completed", "cancelled"].includes(status) ||
     (preferredTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(preferredTime)) ||
     reason.length > 300
@@ -347,6 +379,7 @@ export async function updateAppointmentAction(
       status,
       preferred_time: preferredTime || null,
       reason: reason || null,
+      doctor_id: doctorId || null,
     })
     .eq("id", appointmentId)
     .select("id")
@@ -669,33 +702,85 @@ export async function saveOwnerProfileAction(
         upsert: false,
       });
     if (uploadError) {
-      console.error("Owner profile image upload failed", { code: uploadError.name });
-      return { error: "The profile image could not be uploaded." };
+      console.error("Owner profile image upload failed", {
+        code: (uploadError as { statusCode?: string }).statusCode ?? uploadError.name,
+      });
+      return {
+        error: ((uploadError as { statusCode?: string }).statusCode === "42501")
+          ? "The database/storage denied the photo upload. Confirm the doctor is authorized and the clinic-profile-images Storage policy exists."
+          : "The profile image could not be uploaded. Verify the clinic-profile-images bucket, file type and size.",
+      };
     }
     photoUrl = supabase.storage.from(bucket).getPublicUrl(uploadedPath).data.publicUrl;
   }
 
-  const { error: saveError } = await supabase.from("clinic_profile").upsert(
-    {
-      singleton: true,
-      doctor_name: doctorName,
-      qualification,
-      speciality: speciality || null,
-      registration_info: registrationInfo,
-      public_introduction: introduction,
-      doctor_photo_url: photoUrl,
-    },
-    { onConflict: "singleton" },
-  );
+  let profileFields: Record<string, string | null | boolean> = {
+    singleton: true,
+    doctor_name: doctorName,
+    qualification,
+    public_introduction: introduction,
+    doctor_photo_url: photoUrl,
+  };
+  let saveError: { code?: string; message?: string } | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await supabase.from("clinic_profile").upsert(
+      profileFields,
+      { onConflict: "singleton" },
+    );
+    saveError = result.error;
+    if (!saveError) break;
+    if (saveError.code !== "PGRST204") break;
+
+    const message = saveError.message ?? "";
+    const missingColumn =
+      ["doctor_photo_url"].find((column) =>
+        message.toLowerCase().includes(`'${column}'`) ||
+        message.toLowerCase().includes(`"${column}"`) ||
+        message.toLowerCase().includes(column)
+      );
+    if (!missingColumn || !(missingColumn in profileFields)) break;
+    const retryFields = { ...profileFields };
+    delete retryFields[missingColumn];
+    profileFields = retryFields;
+  }
   if (saveError) {
-    console.error("Owner profile update failed", { code: saveError.code });
+    console.error("Owner profile update failed", {
+      code: saveError.code,
+      message: saveError.message,
+    });
     if (uploadedPath) {
       const { error: cleanupError } = await supabase.storage.from(bucket).remove([uploadedPath]);
       if (cleanupError) {
         console.error("Unpublished owner profile image cleanup failed", { code: cleanupError.name });
       }
     }
-    return { error: "The owner profile could not be saved." };
+    if (saveError.code === "PGRST204") {
+      return { error: "The database profile table or PostgREST schema cache is missing. Apply/reload the clinic_profile migrations, then retry." };
+    }
+    if (saveError.code === "42501") {
+      return { error: "The database denied this profile update. Confirm the signed-in doctor is listed in authorized_doctors and clinic_profile has UPDATE permission." };
+    }
+    return { error: `The owner profile could not be saved (${saveError.code ?? "database error"}). Verify database authorization and connectivity.` };
+  }
+
+  let optionalFieldsWarning = false;
+  const { error: optionalFieldsError } = await supabase
+    .from("clinic_profile")
+    .update({
+      speciality: speciality || null,
+      registration_info: registrationInfo,
+    })
+    .eq("singleton", true);
+  if (optionalFieldsError) {
+    console.error("Optional owner profile fields unavailable", {
+      code: optionalFieldsError.code,
+      message: optionalFieldsError.message,
+    });
+    if (["PGRST204", "PGRST205"].includes(optionalFieldsError.code ?? "")) {
+      optionalFieldsWarning = true;
+    } else {
+      optionalFieldsWarning = true;
+    }
   }
 
   let previousImageCleanupFailed = false;
@@ -726,10 +811,13 @@ export async function saveOwnerProfileAction(
 
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   return {
-    success: previousImageCleanupFailed
-      ? "Profile saved. The previous image could not be removed."
-      : "Profile saved.",
+    success: optionalFieldsWarning
+      ? "Core profile and photo saved. Optional designation/registration columns need the latest Supabase migration."
+      : previousImageCleanupFailed
+        ? "Profile saved. The previous image could not be removed."
+        : "Profile saved.",
   };
 }
 
@@ -775,6 +863,7 @@ export async function saveClinicDetailsAction(
 
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   return { success: "Clinic details saved." };
 }
 
@@ -839,6 +928,7 @@ export async function addLocationAction(
   }
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   revalidatePath("/doctor/availability");
   return { success: "Location added." };
 }
@@ -889,6 +979,7 @@ export async function addStandardLocationsAction(
 
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   revalidatePath("/doctor/availability");
   return { success: "Village consultation and Sarthak Clinic, Ashta are available." };
 }
@@ -907,6 +998,7 @@ export async function addServiceAction(
   }
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   return { success: "Service added." };
 }
 
@@ -980,6 +1072,7 @@ export async function updateLocationAction(
   }
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   revalidatePath("/doctor/availability");
   return { success: "Location updated." };
 }
@@ -1004,6 +1097,7 @@ export async function updateServiceAction(
   }
   revalidatePath("/");
   revalidatePath("/doctor/settings");
+  revalidatePath("/doctor/doctors");
   return { success: "Service updated." };
 }
 

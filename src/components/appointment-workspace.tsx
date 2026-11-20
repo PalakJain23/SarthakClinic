@@ -21,6 +21,7 @@ import {
   type FormActionState,
 } from "@/app/doctor/actions";
 import { AppointmentStatusForm, LinkPatientForm } from "@/components/doctor-forms";
+import { AppointmentNotification } from "@/components/appointment-notification";
 import { formatDate } from "@/lib/format";
 
 export type AppointmentRecord = {
@@ -34,6 +35,7 @@ export type AppointmentRecord = {
   preferredTime: string | null;
   needsContact: boolean;
   createdAt: string;
+  doctorId: string | null;
   session: {
     id: string;
     date: string;
@@ -57,6 +59,12 @@ export type AppointmentSessionOption = {
 };
 
 type PatientOption = { id: string; fullName: string; mobile: string };
+export type AppointmentDoctorOption = {
+  id: string;
+  name: string;
+  specialty: string;
+  isOwner?: boolean;
+};
 type Tab = "today" | "upcoming" | "all";
 const initialState: FormActionState = {};
 const statusNames: Record<string, string> = {
@@ -102,15 +110,18 @@ export function AppointmentWorkspace({
   appointments,
   sessions,
   patients,
+  doctors,
 }: {
   today: string;
   appointments: AppointmentRecord[];
   sessions: AppointmentSessionOption[];
   patients: PatientOption[];
+  doctors: AppointmentDoctorOption[];
 }) {
   const [tab, setTab] = useState<Tab>("today");
   const [dialog, setDialog] = useState<"add" | "edit" | "view" | null>(null);
-  const [selected, setSelected] = useState<AppointmentRecord | null>(null);
+  const [selectedRecord, setSelected] = useState<AppointmentRecord | null>(null);
+  const selected = appointments.find((item) => item.id === selectedRecord?.id) ?? null;
   const router = useRouter();
   const closeAfterSave = useCallback(() => {
     setDialog(null);
@@ -191,7 +202,7 @@ export function AppointmentWorkspace({
                         <td className="px-3 py-4 whitespace-nowrap text-slate-600">{item.mobile}</td>
                         <td className="max-w-40 px-3 py-4 text-slate-600">{item.reason || "—"}</td>
                         <td className="px-3 py-4"><StatusBadge status={item.status} /></td>
-                        <td className="px-3 py-4"><AppointmentActions item={item} onView={() => openDialog("view", item)} onEdit={() => openDialog("edit", item)} /></td>
+                        <td className="px-3 py-4"><AppointmentActions item={item} doctors={doctors} onView={() => openDialog("view", item)} onEdit={() => openDialog("edit", item)} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -207,7 +218,7 @@ export function AppointmentWorkspace({
                     <p className="text-sm text-slate-700">{formatDate(item.session.date)} · {sessionTime(item.session)}</p>
                     {item.preferredTime && <p className="text-xs text-amber-800">Preferred {timeLabel(item.preferredTime)} · not confirmed</p>}
                     <p className="text-sm text-slate-600">{item.reason || "No reason provided"}</p>
-                    <AppointmentActions item={item} onView={() => openDialog("view", item)} onEdit={() => openDialog("edit", item)} />
+                    <AppointmentActions item={item} doctors={doctors} onView={() => openDialog("view", item)} onEdit={() => openDialog("edit", item)} />
                   </li>
                 ))}
               </ul>
@@ -252,7 +263,7 @@ export function AppointmentWorkspace({
               <div><h2 id="appointment-dialog-title" className="text-xl font-bold">{dialog === "add" ? "Add Appointment" : dialog === "edit" ? "Edit Appointment" : "Appointment Details"}</h2><p className="mt-1 text-sm text-slate-600">Clinic session hours are not a patient-specific confirmed time.</p></div>
               <button type="button" onClick={() => setDialog(null)} aria-label="Close" className="flex size-10 items-center justify-center rounded-lg border border-slate-200"><X size={18} /></button>
             </div>
-            {dialog === "add" ? <CreateAppointmentForm sessions={sessions.filter((session) => session.date >= today)} patients={patients} onSaved={closeAfterSave} /> : selected && dialog === "edit" ? <EditAppointmentForm appointment={selected} sessions={sessions} onSaved={closeAfterSave} /> : selected && <AppointmentDetails item={selected} patients={patients} onEdit={() => setDialog("edit")} />}
+            {dialog === "add" ? <CreateAppointmentForm sessions={sessions.filter((session) => session.date >= today)} patients={patients} doctors={doctors} onSaved={closeAfterSave} /> : selected && dialog === "edit" ? <EditAppointmentForm appointment={selected} sessions={sessions} doctors={doctors} onSaved={closeAfterSave} /> : selected && <AppointmentDetails item={selected} patients={patients} doctors={doctors} onEdit={() => setDialog("edit")} />}
           </section>
         </div>
       )}
@@ -267,11 +278,13 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
   </article>;
 }
 
-function AppointmentActions({ item, onView, onEdit }: { item: AppointmentRecord; onView: () => void; onEdit: () => void }) {
+function AppointmentActions({ item, doctors, onView, onEdit }: { item: AppointmentRecord; doctors: AppointmentDoctorOption[]; onView: () => void; onEdit: () => void }) {
+  const doctorName = doctors.find((doctor) => doctor.id === item.doctorId)?.name;
   return <div className="flex flex-wrap items-center gap-2">
     <button type="button" onClick={onView} aria-label={`View ${item.patientName}`} title="View details" className="flex size-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50"><Eye size={16} /></button>
     <button type="button" onClick={onEdit} aria-label={`Edit ${item.patientName}`} title="Edit appointment" className="flex size-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50"><Pencil size={16} /></button>
-    <AppointmentStatusForm id={item.id} status={item.status} />
+    <AppointmentStatusForm key={`${item.id}:${item.status}`} id={item.id} status={item.status} />
+    <AppointmentNotification item={{ ...item, doctorName }} />
   </div>;
 }
 
@@ -281,7 +294,7 @@ function Feedback({ state }: { state: FormActionState }) {
   return null;
 }
 
-function CreateAppointmentForm({ sessions, patients, onSaved }: { sessions: AppointmentSessionOption[]; patients: PatientOption[]; onSaved: () => void }) {
+function CreateAppointmentForm({ sessions, patients, doctors, onSaved }: { sessions: AppointmentSessionOption[]; patients: PatientOption[]; doctors: AppointmentDoctorOption[]; onSaved: () => void }) {
   const [state, action, pending] = useActionState(createAppointmentAction, initialState);
   const keyRef = useRef<HTMLInputElement>(null);
   const [patientId, setPatientId] = useState("");
@@ -291,6 +304,7 @@ function CreateAppointmentForm({ sessions, patients, onSaved }: { sessions: Appo
   return <form action={action} onSubmit={setKey} className="grid gap-4 sm:grid-cols-2">
     <input ref={keyRef} type="hidden" name="idempotencyKey" />
     <label className="text-sm font-semibold sm:col-span-2">Clinic session <select name="sessionId" required defaultValue="" className="field-control"><option value="">Select a saved session</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatDate(session.date)} · {session.locationName} · {sessionTime(session)}</option>)}</select></label>
+    <label className="text-sm font-semibold sm:col-span-2">Doctor <select name="doctorId" defaultValue="" className="field-control"><option value="">Clinic Owner (default)</option>{doctors.filter((doctor) => !doctor.isOwner).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}{doctor.specialty ? ` · ${doctor.specialty}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-500">Choose an additional saved doctor only if this visit is assigned to that doctor.</span></label>
     <label className="text-sm font-semibold sm:col-span-2">Existing patient (optional) <select name="patientId" value={patientId} onChange={(event) => setPatientId(event.target.value)} className="field-control"><option value="">Enter a new appointment contact below</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.fullName} · {patient.mobile}</option>)}</select></label>
     {!selectedPatient && <>
       <label className="text-sm font-semibold">Patient name <input name="patientName" required minLength={2} maxLength={100} className="field-control" /></label>
@@ -306,7 +320,7 @@ function CreateAppointmentForm({ sessions, patients, onSaved }: { sessions: Appo
   </form>;
 }
 
-function EditAppointmentForm({ appointment, sessions, onSaved }: { appointment: AppointmentRecord; sessions: AppointmentSessionOption[]; onSaved: () => void }) {
+function EditAppointmentForm({ appointment, sessions, doctors, onSaved }: { appointment: AppointmentRecord; sessions: AppointmentSessionOption[]; doctors: AppointmentDoctorOption[]; onSaved: () => void }) {
   const [state, action, pending] = useActionState(updateAppointmentAction, initialState);
   useEffect(() => { if (state.successToken) onSaved(); }, [state.successToken, onSaved]);
   const matchingSessions = sessions.some((session) => session.id === appointment.session.id) ? sessions : [
@@ -325,6 +339,7 @@ function EditAppointmentForm({ appointment, sessions, onSaved }: { appointment: 
     <input type="hidden" name="appointmentId" value={appointment.id} />
     <div className="rounded-lg bg-emerald-50 p-3 text-sm sm:col-span-2"><strong>{appointment.patientName}</strong> · {appointment.mobile}</div>
     <label className="text-sm font-semibold sm:col-span-2">Saved clinic session <select name="sessionId" defaultValue={appointment.session.id} required className="field-control">{matchingSessions.map((session) => <option key={session.id} value={session.id}>{formatDate(session.date)} · {session.locationName} · {sessionTime(session)}</option>)}</select></label>
+    <label className="text-sm font-semibold sm:col-span-2">Doctor <select name="doctorId" defaultValue={appointment.doctorId ?? ""} className="field-control"><option value="">Clinic Owner (default)</option>{doctors.filter((doctor) => !doctor.isOwner).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}{doctor.specialty ? ` · ${doctor.specialty}` : ""}</option>)}</select></label>
     <label className="text-sm font-semibold">Status <select name="status" defaultValue={appointment.status} className="field-control">{Object.entries(statusNames).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label>
     <label className="text-sm font-semibold">Preferred time <input name="preferredTime" type="time" defaultValue={appointment.preferredTime?.slice(0, 5) ?? ""} className="field-control" /><span className="mt-1 block text-xs font-normal text-amber-800">Preference only; not confirmed appointment time.</span></label>
     <label className="text-sm font-semibold sm:col-span-2">Reason <textarea name="reason" defaultValue={appointment.reason ?? ""} maxLength={300} rows={3} className="field-control" /></label>
@@ -333,7 +348,8 @@ function EditAppointmentForm({ appointment, sessions, onSaved }: { appointment: 
   </form>;
 }
 
-function AppointmentDetails({ item, patients, onEdit }: { item: AppointmentRecord; patients: PatientOption[]; onEdit: () => void }) {
+function AppointmentDetails({ item, patients, doctors, onEdit }: { item: AppointmentRecord; patients: PatientOption[]; doctors: AppointmentDoctorOption[]; onEdit: () => void }) {
+  const doctor = doctors.find((option) => option.id === item.doctorId);
   return <div className="space-y-4">
     <div className="rounded-xl bg-emerald-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-lg font-bold">{item.patientName}</h3><p className="mt-1 text-sm text-slate-700">{item.mobile}</p></div><StatusBadge status={item.status} /></div>
@@ -342,6 +358,7 @@ function AppointmentDetails({ item, patients, onEdit }: { item: AppointmentRecor
         <Detail label="Location" value={item.session.locationName} />
         <Detail label="Session hours" value={`${sessionTime(item.session)} · Asia/Kolkata`} />
         <Detail label="Preferred time" value={item.preferredTime ? `${timeLabel(item.preferredTime)} · unconfirmed preference` : "Not provided"} />
+        <Detail label="Doctor" value={doctor ? `${doctor.name}${doctor.specialty ? ` · ${doctor.specialty}` : ""}` : "Clinic Owner"} />
         <Detail label="Reason" value={item.reason || "Not provided"} />
         <Detail label="Doctor’s note" value={item.session.privateNote || "No note for this session"} />
       </dl>
@@ -353,6 +370,7 @@ function AppointmentDetails({ item, patients, onEdit }: { item: AppointmentRecor
       {item.patientId && <Link href={`/doctor/accounts?transaction=charge&patient=${item.patientId}`} className="min-h-10 rounded-lg border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-800">Add Charge</Link>}
       <button type="button" onClick={onEdit} className="min-h-10 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Edit appointment</button>
     </div>
+    <AppointmentNotification item={{ ...item, doctorName: doctor?.name }} />
     {!item.patientId && <div className="rounded-xl border border-slate-200 p-4"><p className="mb-3 font-semibold">Link a patient record</p><AppointmentPatientLink appointmentId={item.id} patients={patients} /></div>}
   </div>;
 }

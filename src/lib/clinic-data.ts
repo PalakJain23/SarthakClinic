@@ -4,6 +4,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { getSamplePublicClinic, SAMPLE_PUBLIC_CONTENT } from "@/lib/sample-public-content";
+import {
+  doctorScheduleCoversSession,
+  doctorScheduleSchema,
+  type DoctorSchedule,
+} from "@/lib/doctor-directory-schema";
 
 const initialOwnerPhotoPath = "/images/doctors/subhal-thakur.webp";
 
@@ -17,6 +22,9 @@ export type SessionStatus = "open" | "closed" | "full";
 
 export type PublicSession = {
   id: string;
+  bookingSessionId?: string;
+  doctorId?: string | null;
+  doctorName?: string;
   date: string;
   locationId: string;
   locationName: string;
@@ -26,6 +34,16 @@ export type PublicSession = {
   status: SessionStatus;
   note: string | null;
   isSample: boolean;
+};
+
+export type PublicDoctor = {
+  id: string;
+  fullName: string;
+  specialty: string;
+  doctorType: "Regular" | "Visiting Specialist";
+  qualification: string;
+  photoUrl: string | null;
+  schedule: DoctorSchedule;
 };
 
 export type PublicLocation = {
@@ -54,6 +72,7 @@ export type PublicClinicData = {
   whatsapp: string | null;
   locations: PublicLocation[];
   sessions: PublicSession[];
+  additionalDoctors: PublicDoctor[];
 };
 
 function isDemoMode() {
@@ -105,7 +124,7 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
   const supabase = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const [profileResult, locationResult, sessionResult] =
+  const [profileResult, locationResult, sessionResult, doctorResult] =
     await Promise.all([
       supabase.from("public_clinic_profile").select("*").maybeSingle(),
       supabase.from("public_clinic_locations").select("*").order("sort_order"),
@@ -116,6 +135,10 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
         .lte("session_date", dateInIndia(30))
         .order("session_date")
         .order("starts_at"),
+      supabase
+        .from("public_clinic_doctors")
+        .select("id, full_name, specialty, doctor_type, qualifications, photo_url, schedule")
+        .order("full_name"),
     ]);
 
   for (const result of [
@@ -126,6 +149,14 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
     if (result.error) {
       throw new Error(`Could not load clinic information: ${result.error.message}`);
     }
+  }
+  if (doctorResult.error && doctorResult.error.code !== "PGRST205") {
+    throw new Error(`Could not load additional doctor availability: ${doctorResult.error.message}`);
+  }
+  if (doctorResult.error) {
+    console.error("Public additional doctor directory is not installed", {
+      code: doctorResult.error.code,
+    });
   }
 
   const configuredLocations = (locationResult.data ?? []).map((location) => ({
@@ -149,6 +180,9 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
     return [
       {
         id: session.id,
+        bookingSessionId: session.id,
+        doctorId: null,
+        doctorName: profileResult.data?.doctor_name?.trim() || SAMPLE_PUBLIC_CONTENT.doctorName,
         date: session.session_date,
         locationId: session.location_id,
         locationName: location.name,
@@ -162,6 +196,34 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
     ];
   });
   const profile = profileResult.data;
+  const additionalDoctors = (doctorResult.data ?? []).flatMap((row) => {
+    const schedule = doctorScheduleSchema.safeParse(row.schedule);
+    if (!schedule.success || !row.full_name?.trim() || !row.specialty?.trim()) return [];
+    return [{
+      id: row.id,
+      fullName: row.full_name.trim(),
+      specialty: row.specialty.trim(),
+      doctorType: row.doctor_type === "Visiting Specialist" ? "Visiting Specialist" as const : "Regular" as const,
+      qualification: row.qualifications?.trim() ?? "",
+      photoUrl: row.photo_url?.trim() || null,
+      schedule: schedule.data,
+    }];
+  });
+  const additionalDoctorSessions = actualSessions.flatMap((session) =>
+    additionalDoctors
+      .filter((doctor) => doctorScheduleCoversSession(
+        doctor.schedule,
+        session.date,
+        session.startsAt,
+        session.endsAt,
+      ))
+      .map((doctor) => ({
+        ...session,
+        id: `${session.id}:${doctor.id}`,
+        doctorId: doctor.id,
+        doctorName: doctor.fullName,
+      })),
+  );
   const isSamplePhone = !profile?.public_phone?.trim();
   const isSampleWhatsApp = !profile?.public_whatsapp?.trim();
   const doctorName = profile?.doctor_name?.trim() || SAMPLE_PUBLIC_CONTENT.doctorName;
@@ -178,7 +240,7 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
         isConfigured: true,
         includeSampleSessions: true,
       }).sessions
-    : actualSessions;
+    : [...actualSessions, ...additionalDoctorSessions];
 
   return {
     isDemo: false,
@@ -199,5 +261,6 @@ export async function getPublicClinicData(): Promise<PublicClinicData> {
     whatsapp: profile?.public_whatsapp?.trim() || SAMPLE_PUBLIC_CONTENT.publicWhatsApp,
     locations,
     sessions,
+    additionalDoctors,
   };
 }
