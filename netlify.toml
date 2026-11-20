@@ -1,0 +1,5 @@
+[build.environment]
+  # These NEXT_PUBLIC_* values are browser-facing by design: Next.js inlines them
+  # into the client bundle. The Supabase anon key is a public key protected by
+  # row-level security. None of them are secrets, so exclude them from the scan.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY"
