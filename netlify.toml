@@ -1,0 +1,4 @@
+[build.environment]
+  # NEXT_PUBLIC_SITE_URL is the public site origin. Next.js inlines NEXT_PUBLIC_*
+  # values into the build output by design, so it is not a secret.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL"
